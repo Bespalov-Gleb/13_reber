@@ -1,0 +1,1 @@
+# Cafe Bot - Telegram bot for cafe management
