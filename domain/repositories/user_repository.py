@@ -48,3 +48,13 @@ class UserRepository(ABC):
     async def count(self) -> int:
         """Get total user count."""
         pass
+    
+    @abstractmethod
+    async def list_all(self) -> List[User]:
+        """List all users without pagination."""
+        pass
+    
+    @abstractmethod
+    async def get_by_telegram_id(self, telegram_id: int) -> Optional[User]:
+        """Get user by Telegram ID."""
+        pass

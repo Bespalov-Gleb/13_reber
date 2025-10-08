@@ -372,3 +372,11 @@ class OrderRepositoryImpl(OrderRepository):
             created_at=db_item.created_at,
             updated_at=db_item.updated_at
         )
+    
+    async def get_orders_by_user_id(self, user_id: str) -> List[Order]:
+        """Get orders by user ID."""
+        return await self.get_by_user_id(user_id, limit=100, offset=0)
+    
+    async def get_orders_by_filters(self, filters: OrderFilters) -> List[Order]:
+        """Get orders by filters."""
+        return await self.list_orders(filters)

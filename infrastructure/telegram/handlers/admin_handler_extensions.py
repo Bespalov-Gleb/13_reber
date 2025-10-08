@@ -29,18 +29,6 @@ class AdminHandlerExtensions:
         if data is None:
             data = {}
         user_id = data.get("user_id", message.from_user.id)
-        is_admin = data.get("is_admin", False)
-        if not is_admin:
-            try:
-                from app.config import get_settings
-                if user_id in get_settings().admin_user_ids:
-                    is_admin = True
-            except Exception:
-                pass
-
-        if not is_admin:
-            await message.answer("❌ У вас нет прав администратора")
-            return
 
         state = admin_state_service.get_admin_state(user_id)
         text = message.text
@@ -98,18 +86,6 @@ class AdminHandlerExtensions:
         if data is None:
             data = {}
         user_id = data.get("user_id", message.from_user.id)
-        is_admin = data.get("is_admin", False)
-        if not is_admin:
-            try:
-                from app.config import get_settings
-                if user_id in get_settings().admin_user_ids:
-                    is_admin = True
-            except Exception:
-                pass
-
-        if not is_admin:
-            await message.answer("❌ У вас нет прав администратора")
-            return
 
         state = admin_state_service.get_admin_state(user_id)
 

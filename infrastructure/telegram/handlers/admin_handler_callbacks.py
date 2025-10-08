@@ -35,12 +35,6 @@ class AdminHandlerCallbacks:
     async def handle_edit_category_callback(self, callback: CallbackQuery, **kwargs) -> None:
         """Handle edit category callback."""
         data = kwargs.get("data", {})
-        user_id = data.get("user_id", callback.from_user.id)
-        is_admin = self._is_admin_from_data(data, user_id)
-        
-        if not is_admin:
-            await callback.answer("❌ У вас нет прав администратора")
-            return
         
         # Robust parsing: edit_category:<action>:id:<category_id>
         parts = callback.data.split(":")
@@ -122,11 +116,6 @@ class AdminHandlerCallbacks:
         """Handle edit item callback."""
         data = kwargs.get("data", {})
         user_id = data.get("user_id", callback.from_user.id)
-        is_admin = self._is_admin_from_data(data, user_id)
-        
-        if not is_admin:
-            await callback.answer("❌ У вас нет прав администратора")
-            return
         
         # Robust parsing: edit_item:<action>:id:<item_id>
         parts = callback.data.split(":")
@@ -238,11 +227,6 @@ class AdminHandlerCallbacks:
         """Handle add category callback."""
         data = kwargs.get("data", {})
         user_id = data.get("user_id", callback.from_user.id)
-        is_admin = self._is_admin_from_data(data, user_id)
-        
-        if not is_admin:
-            await callback.answer("❌ У вас нет прав администратора")
-            return
         
         admin_state_service.set_admin_state(user_id, AdminState.ADDING_CATEGORY_NAME)
         await self.admin_handler.safe_edit_message(
@@ -256,11 +240,6 @@ class AdminHandlerCallbacks:
         """Handle add item callback."""
         data = kwargs.get("data", {})
         user_id = data.get("user_id", callback.from_user.id)
-        is_admin = self._is_admin_from_data(data, user_id)
-        
-        if not is_admin:
-            await callback.answer("❌ У вас нет прав администратора")
-            return
         
         admin_state_service.set_admin_state(user_id, AdminState.ADDING_ITEM_NAME)
         await self.admin_handler.safe_edit_message(
@@ -274,11 +253,6 @@ class AdminHandlerCallbacks:
         """Handle select category callback."""
         data = kwargs.get("data", {})
         user_id = data.get("user_id", callback.from_user.id)
-        is_admin = self._is_admin_from_data(data, user_id)
-        
-        if not is_admin:
-            await callback.answer("❌ У вас нет прав администратора")
-            return
         
         # Robust parsing: select_category:id:<category_id>
         parts = callback.data.split(":")

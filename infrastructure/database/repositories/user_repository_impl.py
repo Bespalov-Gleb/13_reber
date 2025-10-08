@@ -141,3 +141,20 @@ class UserRepositoryImpl(UserRepository):
             created_at=db_user.created_at,
             updated_at=db_user.updated_at
         )
+    
+    async def list_all(self) -> List[User]:
+        """List all users without pagination."""
+        result = await self.session.execute(select(UserModel))
+        db_users = result.scalars().all()
+        return [self._model_to_entity(db_user) for db_user in db_users]
+    
+    async def get_by_telegram_id(self, telegram_id: int) -> Optional[User]:
+        """Get user by Telegram ID."""
+        result = await self.session.execute(
+            select(UserModel).where(UserModel.telegram_id == telegram_id)
+        )
+        db_user = result.scalar_one_or_none()
+        
+        if db_user:
+            return self._model_to_entity(db_user)
+        return None

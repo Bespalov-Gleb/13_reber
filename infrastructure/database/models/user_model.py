@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import String, Integer, DateTime, Boolean, Text
+from sqlalchemy import BigInteger
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID
 import uuid
@@ -17,7 +18,7 @@ class UserModel(Base):
     __tablename__ = "users"
     
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    telegram_id: Mapped[int] = mapped_column(Integer, unique=True, nullable=False, index=True)
+    telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False, index=True)
     username: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     first_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     last_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)

@@ -111,3 +111,13 @@ class PaymentRepository(ABC):
     async def get_failed_payments(self) -> List[Payment]:
         """Get failed payments."""
         pass
+    
+    @abstractmethod
+    async def get_all_payments(self) -> List[Payment]:
+        """Get all payments."""
+        pass
+    
+    @abstractmethod
+    async def get_payment_by_order_id(self, order_id: str) -> Optional[Payment]:
+        """Get payment by order ID."""
+        pass

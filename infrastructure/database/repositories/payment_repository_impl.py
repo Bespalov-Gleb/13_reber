@@ -235,3 +235,17 @@ class PaymentRepositoryImpl(PaymentRepository):
             created_at=db_payment.created_at,
             updated_at=db_payment.updated_at
         )
+    
+    async def get_all_payments(self) -> List[Payment]:
+        """Get all payments."""
+        result = await self.session.execute(select(PaymentModel))
+        db_payments = result.scalars().all()
+        return [self._model_to_entity(db_payment) for db_payment in db_payments]
+    
+    async def get_payment_by_order_id(self, order_id: str) -> Optional[Payment]:
+        """Get payment by order ID."""
+        result = await self.session.execute(
+            select(PaymentModel).where(PaymentModel.order_id == order_id)
+        )
+        db_payment = result.scalar_one_or_none()
+        return self._model_to_entity(db_payment) if db_payment else None

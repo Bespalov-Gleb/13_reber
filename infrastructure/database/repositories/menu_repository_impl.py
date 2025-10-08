@@ -286,3 +286,22 @@ class MenuRepositoryImpl(MenuRepository):
             created_at=db_item.created_at,
             updated_at=db_item.updated_at
         )
+    
+    async def list_categories(self, active_only: bool = True) -> List[Category]:
+        """List all categories; optionally only active."""
+        query = select(CategoryModel).order_by(CategoryModel.sort_order, CategoryModel.name)
+        if active_only:
+            query = query.where(CategoryModel.is_active == True)
+        result = await self.session.execute(query)
+        db_categories = result.scalars().all()
+        return [self._category_model_to_entity(db_category) for db_category in db_categories]
+    
+    async def list_menu_items(self, active_only: bool = True, limit: int = 100, offset: int = 0) -> List[MenuItem]:
+        """List all menu items; supports active_only and pagination."""
+        query = select(MenuItemModel).offset(offset).limit(limit)
+        if active_only:
+            query = query.where(MenuItemModel.is_available == True)
+        query = query.order_by(MenuItemModel.sort_order, MenuItemModel.name)
+        result = await self.session.execute(query)
+        db_items = result.scalars().all()
+        return [self._menu_item_model_to_entity(db_item) for db_item in db_items]

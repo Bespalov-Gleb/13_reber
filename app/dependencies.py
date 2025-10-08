@@ -15,6 +15,8 @@ from domain.services.cart_service import CartService
 from domain.services.menu_service import MenuService
 from domain.services.order_service import OrderService
 from domain.services.payment_service import PaymentService
+from domain.services.statistics_service import StatisticsService
+from domain.services.user_service import UserService
 from infrastructure.database.connection import get_session, get_current_session
 from infrastructure.database.repositories.cart_repository_impl import CartRepositoryImpl
 from infrastructure.database.repositories.menu_repository_impl import MenuRepositoryImpl
@@ -103,6 +105,18 @@ class DIContainer:
             test_mode=True
         )
         return PaymentService(payment_repo, order_repo, payment_integration)
+    
+    def get_statistics_service(self, session: AsyncSession) -> StatisticsService:
+        """Get statistics service."""
+        order_repo = self.get_order_repository(session)
+        user_repo = self.get_user_repository(session)
+        menu_repo = self.get_menu_repository(session)
+        return StatisticsService(order_repo, user_repo, menu_repo)
+    
+    def get_user_service(self, session: AsyncSession) -> UserService:
+        """Get user service."""
+        user_repo = self.get_user_repository(session)
+        return UserService(user_repo)
 
 
 # Global container instance
@@ -160,6 +174,30 @@ async def get_payment_service(data: dict | None = None) -> PaymentService:
         from infrastructure.database.connection import get_sessionmaker
         session = get_sessionmaker()()
     return container.get_payment_service(session)  # type: ignore[arg-type]
+
+
+async def get_statistics_service(data: dict | None = None) -> StatisticsService:
+    session = None
+    if data and isinstance(data, dict):
+        session = data.get("session")
+    if session is None:
+        session = get_current_session()
+    if session is None:
+        from infrastructure.database.connection import get_sessionmaker
+        session = get_sessionmaker()()
+    return container.get_statistics_service(session)  # type: ignore[arg-type]
+
+
+async def get_user_service(data: dict | None = None) -> UserService:
+    session = None
+    if data and isinstance(data, dict):
+        session = data.get("session")
+    if session is None:
+        session = get_current_session()
+    if session is None:
+        from infrastructure.database.connection import get_sessionmaker
+        session = get_sessionmaker()()
+    return container.get_user_service(session)  # type: ignore[arg-type]
 
 
 # Dependency annotations for FastAPI-style dependency injection

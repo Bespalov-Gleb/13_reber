@@ -81,3 +81,13 @@ class MenuRepository(ABC):
     async def count_menu_items(self, category_id: Optional[str] = None) -> int:
         """Count menu items."""
         pass
+    
+    @abstractmethod
+    async def list_categories(self) -> List[Category]:
+        """List all categories without filters."""
+        pass
+    
+    @abstractmethod
+    async def list_menu_items(self) -> List[MenuItem]:
+        """List all menu items without filters."""
+        pass

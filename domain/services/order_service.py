@@ -211,3 +211,16 @@ class OrderService:
         for item in order.items:
             total += item.price * item.quantity
         return total
+    
+    async def get_orders_by_status(self, status: str) -> List[Order]:
+        """Get orders by status."""
+        from shared.constants.order_constants import OrderStatus
+        try:
+            order_status = OrderStatus(status)
+        except ValueError:
+            return []
+        return await self.order_repository.get_orders_by_status(order_status)
+    
+    async def get_orders_by_user_id(self, user_id: str) -> List[Order]:
+        """Get orders by user ID."""
+        return await self.order_repository.get_orders_by_user_id(user_id)

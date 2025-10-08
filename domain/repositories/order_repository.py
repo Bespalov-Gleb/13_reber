@@ -28,6 +28,11 @@ class OrderRepository(ABC):
         pass
     
     @abstractmethod
+    async def get_orders_by_user_id(self, user_id: str) -> List[Order]:
+        """Get orders by user ID (alias for get_by_user_id)."""
+        pass
+    
+    @abstractmethod
     async def update(self, order: Order) -> Order:
         """Update order."""
         pass
@@ -90,4 +95,9 @@ class OrderRepository(ABC):
     @abstractmethod
     async def get_pickup_orders(self) -> List[Order]:
         """Get orders for pickup."""
+        pass
+    
+    @abstractmethod
+    async def get_orders_by_filters(self, filters: OrderFilters) -> List[Order]:
+        """Get orders by filters."""
         pass

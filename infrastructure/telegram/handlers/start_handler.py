@@ -44,6 +44,32 @@ class StartHandler(BaseHandler):
             data = {}
         user_id = data.get("user_id", message.from_user.id)
         is_admin = data.get("is_admin", False)
+        # Ensure user exists and sync profile at the moment of /start
+        from app.dependencies import get_user_service
+        user_service = await get_user_service(data)
+        tg = message.from_user
+        existing = await user_service.get_user_by_telegram_id(tg.id)
+        if existing:
+            updated = False
+            if tg.username != existing.username:
+                existing.username = tg.username
+                updated = True
+            if tg.first_name != existing.first_name:
+                existing.first_name = tg.first_name
+                updated = True
+            if tg.last_name != existing.last_name:
+                existing.last_name = tg.last_name
+                updated = True
+            if updated:
+                await user_service.update_user(existing)
+            db_user = existing
+        else:
+            db_user = await user_service.create_user(
+                telegram_id=tg.id,
+                username=tg.username,
+                first_name=tg.first_name,
+                last_name=tg.last_name,
+            )
         if not is_admin:
             try:
                 from app.config import get_settings
@@ -52,6 +78,18 @@ class StartHandler(BaseHandler):
             except Exception:
                 pass
         
+        # Determine admin via env or role in DB
+        if not is_admin:
+            try:
+                from app.config import get_settings
+                if user_id in get_settings().admin_user_ids:
+                    is_admin = True
+            except Exception:
+                pass
+        # Role-based admin
+        if not is_admin and db_user and getattr(db_user, "is_admin", False):
+            is_admin = True
+
         # Get cafe information from settings
         cafe_name = "Кафе"  # TODO: Get from settings
         working_hours = "09:00-22:00"  # TODO: Get from settings

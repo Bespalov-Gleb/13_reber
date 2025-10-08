@@ -1,6 +1,6 @@
 """Payment service for business logic."""
 
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from datetime import datetime
 
 from domain.entities.payment import Payment
@@ -148,3 +148,24 @@ class PaymentService:
         """Get payment URL."""
         payment = await self.payment_repository.get_payment_by_id(payment_id)
         return payment.payment_url if payment else None
+    
+    async def get_all_payments(self) -> List[Payment]:
+        """Get all payments."""
+        return await self.payment_repository.get_all_payments()
+    
+    async def get_payments_by_status(self, status: str) -> List[Payment]:
+        """Get payments by status."""
+        from shared.constants.order_constants import PaymentStatus
+        try:
+            payment_status = PaymentStatus(status)
+        except ValueError:
+            return []
+        return await self.payment_repository.get_payments_by_status(payment_status)
+    
+    async def get_payment_by_id(self, payment_id: str) -> Optional[Payment]:
+        """Get payment by ID."""
+        return await self.payment_repository.get_by_id(payment_id)
+    
+    async def get_refunds(self) -> List[Payment]:
+        """Get refunded payments."""
+        return await self.payment_repository.get_payments_by_status(PaymentStatus.REFUNDED)
