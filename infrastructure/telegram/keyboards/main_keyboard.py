@@ -22,6 +22,7 @@ class MainKeyboard(BaseKeyboard):
                 InlineKeyboardButton(text="📍 Контакты", callback_data="contacts"),
             ],
             [
+                InlineKeyboardButton(text="🪑 Бронирование столика", callback_data="booking"),
                 InlineKeyboardButton(text="☎️ Поддержка", callback_data="support"),
             ]
         ]
@@ -41,6 +42,7 @@ class MainKeyboard(BaseKeyboard):
                 InlineKeyboardButton(text="📍 Контакты", callback_data="contacts"),
             ],
             [
+                InlineKeyboardButton(text="🪑 Бронирование столика", callback_data="booking"),
                 InlineKeyboardButton(text="☎️ Поддержка", callback_data="support"),
             ],
             [
@@ -65,6 +67,9 @@ class MainKeyboard(BaseKeyboard):
             [
                 InlineKeyboardButton(text="💰 Платежи", callback_data="admin_payments"),
                 InlineKeyboardButton(text="📢 Уведомления", callback_data="admin_notifications"),
+            ],
+            [
+                InlineKeyboardButton(text="🪑 Бронирования", callback_data="admin_bookings"),
             ],
             [
                 InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu"),

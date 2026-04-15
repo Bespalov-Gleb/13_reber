@@ -75,6 +75,7 @@ class OrderFilters:
     date_from: Optional[datetime] = None
     date_to: Optional[datetime] = None
     user_id: Optional[str] = None
+    courier_id: Optional[str] = None
     limit: int = 50
     offset: int = 0
 

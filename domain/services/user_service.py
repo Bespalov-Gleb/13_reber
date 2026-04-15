@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from domain.entities.user import User
 from domain.repositories.user_repository import UserRepository
+from shared.types.user_types import UserRole, UserStatus
 
 
 class UserService:
@@ -24,14 +25,14 @@ class UserService:
     ) -> User:
         """Create a new user."""
         user = User(
-            id=str(uuid4()),
+            user_id=str(uuid4()),
             telegram_id=telegram_id,
             username=username,
             first_name=first_name,
             last_name=last_name,
             phone=phone,
-            is_active=True,
-            is_blocked=False,
+            role=UserRole.CUSTOMER,
+            status=UserStatus.ACTIVE,
             created_at=datetime.now(),
             updated_at=datetime.now()
         )
@@ -78,7 +79,7 @@ class UserService:
         """Block a user."""
         user = await self.user_repository.get_by_id(user_id)
         if user:
-            user.is_blocked = True
+            user.status = UserStatus.BLOCKED
             user.updated_at = datetime.now()
             await self.user_repository.update(user)
             return True
@@ -88,7 +89,7 @@ class UserService:
         """Unblock a user."""
         user = await self.user_repository.get_by_id(user_id)
         if user:
-            user.is_blocked = False
+            user.status = UserStatus.ACTIVE
             user.updated_at = datetime.now()
             await self.user_repository.update(user)
             return True

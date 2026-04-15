@@ -96,8 +96,11 @@ class CallbackParser:
     @staticmethod
     def get_action(callback_data: str) -> Optional[str]:
         """Get action from callback data."""
-        data = extract_callback_data(callback_data, "")
-        return data.get("action")
+        # For callback data like "booking:guests:count:3", extract "guests"
+        parts = callback_data.split(":")
+        if len(parts) >= 2:
+            return parts[1]
+        return None
     
     @staticmethod
     def get_value(callback_data: str, key: str) -> Optional[str]:
@@ -134,3 +137,45 @@ class CallbackParser:
     def is_payment_callback(callback_data: str) -> bool:
         """Check if callback is payment related."""
         return callback_data.startswith(CALLBACK_PREFIX_PAYMENT)
+    
+    @staticmethod
+    def get_guests_count(callback_data: str) -> Optional[int]:
+        """Get guests count from booking callback data."""
+        data = extract_callback_data(callback_data, "")
+        count_str = data.get("count")
+        if count_str:
+            try:
+                return int(count_str)
+            except ValueError:
+                pass
+        return None
+    
+    @staticmethod
+    def get_booking_date(callback_data: str) -> Optional[str]:
+        """Get booking date from callback data."""
+        data = extract_callback_data(callback_data, "")
+        return data.get("date")
+    
+    @staticmethod
+    def get_booking_time(callback_data: str) -> Optional[str]:
+        """Get booking time from callback data."""
+        data = extract_callback_data(callback_data, "")
+        return data.get("time")
+    
+    @staticmethod
+    def get_sub_action(callback_data: str) -> Optional[str]:
+        """Get sub action from callback data."""
+        # For callback data like "booking:contact:name", extract "name"
+        parts = callback_data.split(":")
+        if len(parts) >= 3:
+            return parts[2]
+        return None
+    
+    @staticmethod
+    def get_contact_action(callback_data: str) -> Optional[str]:
+        """Get contact action from callback data."""
+        # For callback data like "booking:contact:name", extract "name"
+        parts = callback_data.split(":")
+        if len(parts) >= 3:
+            return parts[2]
+        return None

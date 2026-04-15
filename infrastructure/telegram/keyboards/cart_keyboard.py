@@ -35,8 +35,8 @@ class CartKeyboard(BaseKeyboard):
         buttons.append([
             BaseKeyboard.create_callback_button(
                 text="🚚 Оформить заказ",
-                prefix="cart",
-                action="order"
+                prefix="order",
+                action=""
             )
         ])
         

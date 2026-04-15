@@ -1,6 +1,8 @@
 """Yandex Maps provider implementation."""
 
-from typing import Optional, Tuple
+import aiohttp
+import json
+from typing import Optional, Tuple, List, Dict
 
 from domain.value_objects.address import Address
 from infrastructure.external.maps.base_maps import BaseMapsProvider
@@ -12,16 +14,93 @@ class YandexMapsProvider(BaseMapsProvider):
     def __init__(self, api_key: str):
         self.api_key = api_key
         self.base_url = "https://geocode-maps.yandex.ru/1.x"
+        self.suggest_url = "https://suggest-maps.yandex.ru/v1/suggest"
     
+    async def suggest_addresses(self, query: str, limit: int = 5) -> List[Dict[str, str]]:
+        """Get address suggestions using Yandex Suggest API."""
+        try:
+            async with aiohttp.ClientSession() as session:
+                params = {
+                    "apikey": self.api_key,
+                    "text": query,
+                    "lang": "ru_RU",
+                    "results": limit,
+                    "type": "address"
+                }
+                
+                async with session.get(self.suggest_url, params=params) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        suggestions = []
+                        
+                        if "results" in data:
+                            for result in data["results"]:
+                                if "title" in result and "subtitle" in result:
+                                    suggestions.append({
+                                        "title": result["title"],
+                                        "subtitle": result["subtitle"],
+                                        "full_address": f"{result['title']}, {result['subtitle']}",
+                                        "coordinates": result.get("coordinates", {})
+                                    })
+                        
+                        return suggestions
+                    else:
+                        return []
+        except Exception as e:
+            print(f"Error getting address suggestions: {e}")
+            return []
+
     async def geocode_address(self, address: str) -> Optional[Tuple[float, float]]:
         """Geocode address to coordinates using Yandex Maps."""
-        # TODO: Implement Yandex Maps geocoding
-        raise NotImplementedError
+        try:
+            async with aiohttp.ClientSession() as session:
+                params = {
+                    "apikey": self.api_key,
+                    "geocode": address,
+                    "format": "json",
+                    "results": 1
+                }
+                
+                async with session.get(self.base_url, params=params) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        
+                        if "response" in data and "GeoObjectCollection" in data["response"]:
+                            geo_objects = data["response"]["GeoObjectCollection"]["featureMember"]
+                            if geo_objects:
+                                pos = geo_objects[0]["GeoObject"]["Point"]["pos"]
+                                lon, lat = map(float, pos.split())
+                                return (lat, lon)
+                    
+                    return None
+        except Exception as e:
+            print(f"Error geocoding address: {e}")
+            return None
     
     async def reverse_geocode(self, latitude: float, longitude: float) -> Optional[str]:
         """Reverse geocode coordinates to address using Yandex Maps."""
-        # TODO: Implement Yandex Maps reverse geocoding
-        raise NotImplementedError
+        try:
+            async with aiohttp.ClientSession() as session:
+                params = {
+                    "apikey": self.api_key,
+                    "geocode": f"{longitude},{latitude}",
+                    "format": "json",
+                    "results": 1
+                }
+                
+                async with session.get(self.base_url, params=params) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        
+                        if "response" in data and "GeoObjectCollection" in data["response"]:
+                            geo_objects = data["response"]["GeoObjectCollection"]["featureMember"]
+                            if geo_objects:
+                                return geo_objects[0]["GeoObject"]["metaDataProperty"]["GeocoderMetaData"]["text"]
+                    
+                    return None
+        except Exception as e:
+            print(f"Error reverse geocoding: {e}")
+            return None
     
     async def calculate_distance(
         self,
@@ -29,8 +108,27 @@ class YandexMapsProvider(BaseMapsProvider):
         destination: Tuple[float, float]
     ) -> Optional[float]:
         """Calculate distance between two points using Yandex Maps."""
-        # TODO: Implement Yandex Maps distance calculation
-        raise NotImplementedError
+        # Simple Euclidean distance calculation for now
+        # In production, you might want to use Yandex Router API
+        import math
+        
+        lat1, lon1 = origin
+        lat2, lon2 = destination
+        
+        # Haversine formula for distance calculation
+        R = 6371000  # Earth's radius in meters
+        
+        lat1_rad = math.radians(lat1)
+        lat2_rad = math.radians(lat2)
+        delta_lat = math.radians(lat2 - lat1)
+        delta_lon = math.radians(lon2 - lon1)
+        
+        a = (math.sin(delta_lat / 2) ** 2 + 
+             math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(delta_lon / 2) ** 2)
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+        
+        distance = R * c
+        return distance
     
     async def calculate_duration(
         self,
@@ -38,18 +136,29 @@ class YandexMapsProvider(BaseMapsProvider):
         destination: Tuple[float, float]
     ) -> Optional[int]:
         """Calculate travel duration between two points using Yandex Maps."""
-        # TODO: Implement Yandex Maps duration calculation
-        raise NotImplementedError
+        # Simple estimation: 1 minute per 500 meters
+        distance = await self.calculate_distance(origin, destination)
+        if distance:
+            return int(distance / 500)  # minutes
+        return None
     
     async def validate_delivery_zone(
         self,
-        address: Address,
+        address: str,
         cafe_coordinates: Tuple[float, float],
-        max_distance: float
+        max_distance: float = 5000  # 5km default
     ) -> bool:
         """Validate if address is within delivery zone using Yandex Maps."""
-        # TODO: Implement Yandex Maps delivery zone validation
-        raise NotImplementedError
+        try:
+            address_coords = await self.geocode_address(address)
+            if not address_coords:
+                return False
+            
+            distance = await self.calculate_distance(cafe_coordinates, address_coords)
+            return distance is not None and distance <= max_distance
+        except Exception as e:
+            print(f"Error validating delivery zone: {e}")
+            return False
     
     async def get_route(
         self,
@@ -57,8 +166,19 @@ class YandexMapsProvider(BaseMapsProvider):
         destination: Tuple[float, float]
     ) -> Optional[dict]:
         """Get route between two points using Yandex Maps."""
-        # TODO: Implement Yandex Maps route calculation
-        raise NotImplementedError
+        # For now, return basic route info
+        # In production, use Yandex Router API
+        distance = await self.calculate_distance(origin, destination)
+        duration = await self.calculate_duration(origin, destination)
+        
+        if distance and duration:
+            return {
+                "distance": distance,
+                "duration": duration,
+                "origin": origin,
+                "destination": destination
+            }
+        return None
     
     async def get_map_url(
         self,
@@ -67,5 +187,4 @@ class YandexMapsProvider(BaseMapsProvider):
         zoom: int = 15
     ) -> str:
         """Get Yandex Maps URL for coordinates."""
-        # TODO: Implement Yandex Maps URL generation
-        raise NotImplementedError
+        return f"https://yandex.ru/maps/?ll={longitude},{latitude}&z={zoom}&l=map"

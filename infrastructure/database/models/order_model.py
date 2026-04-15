@@ -39,6 +39,9 @@ class OrderModel(Base):
     # Order comment
     comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
+    # Courier assignment
+    courier_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
+    
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
@@ -49,7 +52,8 @@ class OrderModel(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationships
-    user: Mapped["UserModel"] = relationship("UserModel", back_populates="orders")
+    user: Mapped["UserModel"] = relationship("UserModel", back_populates="orders", foreign_keys=[user_id])
+    courier: Mapped[Optional["UserModel"]] = relationship("UserModel", foreign_keys=[courier_id], overlaps="courier_orders")
     payment: Mapped[Optional["PaymentModel"]] = relationship("PaymentModel", back_populates="order", uselist=False)
     
     def __repr__(self) -> str:

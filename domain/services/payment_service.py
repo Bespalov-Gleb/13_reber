@@ -77,6 +77,20 @@ class PaymentService:
         payment.updated_at = datetime.now()
 
         return await self.payment_repository.update_payment(payment)
+    
+    async def update_payment_status(self, payment_id: str, status: str) -> bool:
+        """Update payment status directly."""
+        try:
+            payment = await self.payment_repository.get_payment_by_id(payment_id)
+            if not payment:
+                return False
+
+            payment.status = status
+            payment.updated_at = datetime.now()
+            await self.payment_repository.update_payment(payment)
+            return True
+        except Exception:
+            return False
 
     async def process_payment_webhook(self, webhook_data: Dict[str, Any]) -> Payment:
         """Process payment webhook."""

@@ -127,6 +127,24 @@ class AdminHandler(BaseHandler):
             F.data.startswith("stats:")
         )
         
+        # Bookings management callbacks
+        self.router.callback_query.register(
+            self.callbacks.handle_bookings_callback,
+            F.data.startswith("admin_bookings")
+        )
+        
+        # iiko management callbacks
+        self.router.callback_query.register(
+            self.callbacks.handle_iiko_callback,
+            F.data.startswith("admin_iiko")
+        )
+        
+        # couriers management callbacks
+        self.router.callback_query.register(
+            self.callbacks.handle_couriers_callback,
+            F.data.startswith("admin_couriers")
+        )
+        
         # Users management callbacks
         self.router.callback_query.register(
             self.management.handle_users_callback,
@@ -778,19 +796,26 @@ class AdminHandler(BaseHandler):
             return
 
         try:
-            # Get order service
+            # Get services
             session = data.get("session")
             if session is None:
                 order_service = await get_order_service(data)
+                user_service = await get_user_service(data)
+                notification_service = await get_notification_service(data)
             else:
                 from app.dependencies import container
                 order_service = container.get_order_service(session)
+                user_service = container.get_user_service(session)
+                notification_service = container.get_notification_service(session)
 
             # Get order
             order = await order_service.get_order(order_id)
             if not order:
                 await callback.answer("❌ Заказ не найден")
                 return
+
+            # Store old status for notification
+            old_status = order.status
 
             # Update order status
             from shared.constants.order_constants import OrderStatus
@@ -825,9 +850,22 @@ class AdminHandler(BaseHandler):
                 await order_service.update_order_status(order.order_id, OrderStatus.CANCELLED)
                 await callback.answer("❌ Заказ отменен")
                 
+            elif action == "assign_courier":
+                # Handle courier assignment
+                await self._handle_courier_assignment(callback, order, data)
+                return
+                
             else:
                 await callback.answer("❌ Неизвестное действие")
                 return
+
+            # Send notification to user about status change
+            try:
+                user = await user_service.get_user_by_id(order.user_id)
+                if user:
+                    await notification_service.send_order_status_notification(order, user, old_status)
+            except Exception as e:
+                self.logger.error(f"Failed to send status notification: {e}")
 
             # Update the message with new order details
             from infrastructure.telegram.utils.message_formatter import MessageFormatter
@@ -1082,3 +1120,40 @@ class AdminHandler(BaseHandler):
         except Exception as e:
             self.logger.error(f"Period statistics error: {e}")
             await callback.answer("❌ Произошла ошибка при загрузке статистики")
+    
+    async def _handle_courier_assignment(self, callback: CallbackQuery, order: 'Order', data: Dict[str, Any]) -> None:
+        """Handle courier assignment for an order."""
+        try:
+            # Get user service to find available couriers
+            session = data.get("session")
+            if session is None:
+                from app.dependencies import get_user_service
+                user_service = await get_user_service(data)
+            else:
+                from app.dependencies import container
+                user_service = container.get_user_service(session)
+            
+            # Get all users with courier role
+            from shared.types.user_types import UserRole
+            all_users = await user_service.get_all_users()
+            couriers = [user for user in all_users if user.role == UserRole.COURIER and user.is_active]
+            
+            if not couriers:
+                await callback.answer("❌ Нет доступных курьеров")
+                return
+            
+            # Create courier selection keyboard
+            from infrastructure.telegram.keyboards.courier_admin_keyboard import CourierAdminKeyboard
+            keyboard = CourierAdminKeyboard.get_courier_selection_keyboard(couriers, order.order_id)
+            
+            text = f"🚚 <b>Назначить курьера для заказа #{order.order_id[:8]}</b>\n\nВыберите курьера:"
+            
+            await self.safe_edit_message(
+                callback.message,
+                text=text,
+                reply_markup=keyboard
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Courier assignment error: {e}")
+            await callback.answer("❌ Произошла ошибка при назначении курьера")

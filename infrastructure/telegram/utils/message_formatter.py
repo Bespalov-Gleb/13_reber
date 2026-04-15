@@ -5,6 +5,7 @@ from typing import List, Optional
 from domain.entities.cart import Cart
 from domain.entities.menu_item import MenuItem
 from domain.entities.order import Order
+from domain.entities.user import User
 from shared.utils.formatters import format_price, format_datetime, format_order_status, format_payment_method, format_order_type
 
 
@@ -21,6 +22,22 @@ class MessageFormatter:
 
 Выберите действие из меню ниже:
         """.strip()
+    
+    @staticmethod
+    def format_closed_message(cafe_name: str, working_hours: str, cafe_address: str, cafe_phone: str) -> str:
+        """Format message when cafe is closed."""
+        message = f"""
+🚫 <b>{cafe_name} сейчас закрыто</b>
+
+🕐 <b>Режим работы:</b> {working_hours}
+
+📍 <b>Адрес:</b> {cafe_address}
+☎️ <b>Телефон:</b> {cafe_phone}
+
+Заказы принимаются только в рабочее время.
+        """.strip()
+        
+        return message
     
     @staticmethod
     def format_menu_item(item: MenuItem) -> str:
@@ -211,3 +228,124 @@ class MessageFormatter:
     def format_info_message(message: str) -> str:
         """Format info message."""
         return f"ℹ️ {message}"
+    
+    @staticmethod
+    def format_order_status_notification(order: Order, status) -> str:
+        """Format order status notification message."""
+        # Map status to emoji and text
+        status_messages = {
+            "pending": "✅ Заказ принят",
+            "confirmed": "✅ Заказ подтвержден", 
+            "preparing": "👨‍🍳 Заказ готовится",
+            "ready": "🚶 Заказ готов к самовывозу" if order.order_type.value == "pickup" else "🚚 Заказ готов к доставке",
+            "delivery": "🚚 Заказ передан в доставку",
+            "delivered": "🎉 Заказ доставлен",
+            "picked_up": "🎉 Заказ выполнен",
+            "cancelled": "❌ Заказ отменен",
+            "refunded": "💰 Заказ возвращен"
+        }
+        
+        status_text = status_messages.get(status.value, f"📋 Статус заказа изменен: {status.value}")
+        
+        message = f"{status_text}\n\n"
+        message += f"📋 <b>Заказ #{order.order_id[:8]}</b>\n"
+        message += f"💰 <b>Сумма:</b> {format_price(order.total)}\n"
+        
+        if order.order_type.value == "delivery" and order.delivery_info:
+            message += f"📍 <b>Адрес:</b> {order.delivery_info.address}\n"
+            if order.delivery_info.phone:
+                message += f"📞 <b>Телефон:</b> {order.delivery_info.phone}\n"
+        elif order.order_type.value == "pickup":
+            message += f"📍 <b>Самовывоз</b>\n"
+        
+        if order.comment:
+            message += f"💬 <b>Комментарий:</b> {order.comment}\n"
+        
+        # Add estimated time based on status
+        if status.value == "preparing":
+            message += f"\n⏱️ <b>Примерное время готовности:</b> 20-30 минут"
+        elif status.value == "delivery":
+            message += f"\n⏱️ <b>Примерное время доставки:</b> 30-45 минут"
+        
+        return message
+    
+    @staticmethod
+    def format_admin_new_order_notification(order: Order, user: User) -> str:
+        """Format admin new order notification message."""
+        message = f"🆕 <b>НОВЫЙ ЗАКАЗ</b>\n\n"
+        message += f"📋 <b>Заказ #{order.order_id[:8]}</b>\n"
+        message += f"👤 <b>Клиент:</b> {user.first_name or 'Не указано'}"
+        if user.last_name:
+            message += f" {user.last_name}"
+        message += f"\n📱 <b>Telegram:</b> @{user.username or 'Не указан'} (ID: {user.telegram_id})\n"
+        
+        if user.phone:
+            message += f"📞 <b>Телефон:</b> {user.phone}\n"
+        
+        message += f"\n💰 <b>Сумма:</b> {format_price(order.total)}\n"
+        message += f"📦 <b>Тип:</b> {'Доставка' if order.order_type.value == 'delivery' else 'Самовывоз'}\n"
+        message += f"💳 <b>Оплата:</b> {format_payment_method(order.payment_method)}\n"
+        
+        if order.order_type.value == "delivery" and order.delivery_info:
+            message += f"\n📍 <b>Адрес доставки:</b>\n{order.delivery_info.address}\n"
+            if order.delivery_info.phone:
+                message += f"📞 <b>Телефон для доставки:</b> {order.delivery_info.phone}\n"
+            if order.delivery_info.comment:
+                message += f"💬 <b>Комментарий к доставке:</b> {order.delivery_info.comment}\n"
+        elif order.order_type.value == "pickup":
+            message += f"\n📍 <b>Самовывоз</b>\n"
+        
+        if order.comment:
+            message += f"\n💬 <b>Комментарий к заказу:</b> {order.comment}\n"
+        
+        # Add order items
+        message += f"\n📦 <b>Состав заказа:</b>\n"
+        for item in order.items:
+            message += f"• {item.name} x{item.quantity} - {format_price(item.price * item.quantity)}\n"
+            if item.comment:
+                message += f"  💬 {item.comment}\n"
+        
+        message += f"\n🕐 <b>Время заказа:</b> {format_datetime(order.created_at)}"
+        
+        return message
+    
+    @staticmethod
+    def format_admin_order_management_message(order: Order, user: User) -> str:
+        """Format admin order management message with action buttons."""
+        message = f"📋 <b>УПРАВЛЕНИЕ ЗАКАЗОМ</b>\n\n"
+        message += f"🆔 <b>Заказ #{order.order_id[:8]}</b>\n"
+        message += f"👤 <b>Клиент:</b> {user.first_name or 'Не указано'}"
+        if user.last_name:
+            message += f" {user.last_name}"
+        message += f"\n📱 <b>Telegram:</b> @{user.username or 'Не указан'} (ID: {user.telegram_id})\n"
+        
+        if user.phone:
+            message += f"📞 <b>Телефон:</b> {user.phone}\n"
+        
+        message += f"\n💰 <b>Сумма:</b> {format_price(order.total)}\n"
+        message += f"📦 <b>Тип:</b> {'Доставка' if order.order_type.value == 'delivery' else 'Самовывоз'}\n"
+        message += f"💳 <b>Оплата:</b> {format_payment_method(order.payment_method)}\n"
+        message += f"📊 <b>Статус:</b> {format_order_status(order.status)}\n"
+        
+        if order.order_type.value == "delivery" and order.delivery_info:
+            message += f"\n📍 <b>Адрес доставки:</b>\n{order.delivery_info.address}\n"
+            if order.delivery_info.phone:
+                message += f"📞 <b>Телефон для доставки:</b> {order.delivery_info.phone}\n"
+            if order.delivery_info.comment:
+                message += f"💬 <b>Комментарий к доставке:</b> {order.delivery_info.comment}\n"
+        elif order.order_type.value == "pickup":
+            message += f"\n📍 <b>Самовывоз</b>\n"
+        
+        if order.comment:
+            message += f"\n💬 <b>Комментарий к заказу:</b> {order.comment}\n"
+        
+        # Add order items
+        message += f"\n📦 <b>Состав заказа:</b>\n"
+        for item in order.items:
+            message += f"• {item.name} x{item.quantity} - {format_price(item.price * item.quantity)}\n"
+            if item.comment:
+                message += f"  💬 {item.comment}\n"
+        
+        message += f"\n🕐 <b>Время заказа:</b> {format_datetime(order.created_at)}"
+        
+        return message

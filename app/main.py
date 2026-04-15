@@ -48,11 +48,19 @@ async def lifespan(app: web.Application):
     app["bot"] = bot
     app["dispatcher"] = dp
 
+    # Start background tasks
+    from app.background_tasks import background_task_manager
+    await background_task_manager.start()
+    logger.info("Background tasks started")
+
     logger.info("Application started")
 
     yield
 
     # Cleanup
+    await background_task_manager.stop()
+    logger.info("Background tasks stopped")
+    
     if settings.is_production and settings.bot_webhook_url:
         await bot.delete_webhook()
         logger.info("Webhook deleted")
@@ -72,6 +80,11 @@ def create_app() -> web.Application:
 
     app = web.Application()
     app.router.add_get("/health", health_check)
+
+    # Add payment webhook routes
+    from infrastructure.telegram.handlers.webhook_handler import webhook_handler
+    for route in webhook_handler.get_routes():
+        app.router.add_route(route.method, route.path, route.handler)
 
     # Setup webhook handler if in production
     if settings.is_production and settings.bot_webhook_url:
@@ -120,6 +133,11 @@ async def main():
         # Initialize database
         await init_database(settings.database_url)
 
+        # Start background tasks
+        from app.background_tasks import background_task_manager
+        await background_task_manager.start()
+        print("Background tasks started")
+
         print("Bot started in development mode with polling")
 
         try:
@@ -127,6 +145,8 @@ async def main():
         except KeyboardInterrupt:
             pass
         finally:
+            await background_task_manager.stop()
+            print("Background tasks stopped")
             await bot.session.close()
 
 

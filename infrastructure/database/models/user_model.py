@@ -36,7 +36,8 @@ class UserModel(Base):
     
     # Relationships
     carts: Mapped[list["CartModel"]] = relationship("CartModel", back_populates="user")
-    orders: Mapped[list["OrderModel"]] = relationship("OrderModel", back_populates="user")
+    orders: Mapped[list["OrderModel"]] = relationship("OrderModel", back_populates="user", foreign_keys="OrderModel.user_id")
+    courier_orders: Mapped[list["OrderModel"]] = relationship("OrderModel", foreign_keys="OrderModel.courier_id")
     payments: Mapped[list["PaymentModel"]] = relationship("PaymentModel", back_populates="user")
     
     def __repr__(self) -> str:

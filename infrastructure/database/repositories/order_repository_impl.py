@@ -102,6 +102,7 @@ class OrderRepositoryImpl(OrderRepository):
         db_order.delivery_phone = order.delivery_info.phone if order.delivery_info else None
         db_order.pickup_phone = order.pickup_info.phone if order.pickup_info else None
         db_order.comment = order.comment
+        db_order.courier_id = order.courier_id
         db_order.updated_at = datetime.now()
         
         await self.session.flush()
@@ -141,6 +142,9 @@ class OrderRepositoryImpl(OrderRepository):
         
         if filters.user_id:
             conditions.append(OrderModel.user_id == filters.user_id)
+        
+        if filters.courier_id:
+            conditions.append(OrderModel.courier_id == filters.courier_id)
         
         if filters.date_from:
             conditions.append(OrderModel.created_at >= filters.date_from)
@@ -235,6 +239,9 @@ class OrderRepositoryImpl(OrderRepository):
             
             if filters.user_id:
                 conditions.append(OrderModel.user_id == filters.user_id)
+            
+            if filters.courier_id:
+                conditions.append(OrderModel.courier_id == filters.courier_id)
             
             if filters.date_from:
                 conditions.append(OrderModel.created_at >= filters.date_from)
@@ -348,6 +355,7 @@ class OrderRepositoryImpl(OrderRepository):
             delivery_info=delivery_info,
             pickup_info=pickup_info,
             comment=db_order.comment,
+            courier_id=db_order.courier_id,
             created_at=db_order.created_at,
             updated_at=db_order.updated_at
         )

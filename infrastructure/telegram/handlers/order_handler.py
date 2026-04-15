@@ -7,15 +7,29 @@ from aiogram.types import CallbackQuery, Message
 from aiogram import F
 from infrastructure.telegram.handlers.base_handler import BaseHandler
 from infrastructure.telegram.keyboards.cart_keyboard import CartKeyboard
+from infrastructure.telegram.keyboards.order_keyboard import OrderKeyboard
 from infrastructure.telegram.utils.message_formatter import MessageFormatter
 from infrastructure.telegram.utils.callback_parser import CallbackParser
 from domain.services.order_service import OrderService
 from domain.services.cart_service import CartService
-from app.dependencies import get_order_service, get_cart_service
+from domain.services.user_service import UserService
+from domain.services.notification_service import NotificationService
+from domain.services.order_state_service import OrderStateService
+from infrastructure.external.maps.yandex_maps import YandexMapsProvider
+from shared.types.order_states import OrderState
+from app.dependencies import (
+    get_order_service, get_cart_service, get_user_service, 
+    get_notification_service, get_order_state_service, get_maps_service
+)
+from infrastructure.telegram.handlers.order_handler_helpers import OrderHandlerHelpers
 
 
 class OrderHandler(BaseHandler):
     """Handler for order operations."""
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.helpers = OrderHandlerHelpers(self.logger)
     
     def _register_handlers(self) -> None:
         """Register order handlers."""
@@ -25,8 +39,33 @@ class OrderHandler(BaseHandler):
             F.text == "🚚 Оформить заказ"
         )
         
-        # Callback handlers
-        # More specific callbacks must be registered before generic ones
+        # Text message handler for order flow
+        self.router.message.register(
+            self.handle_order_text_message,
+            F.text
+        )
+        
+        # Callback handlers - order by specificity
+        self.router.callback_query.register(
+            self.handle_order_address_callback,
+            F.data.startswith("order:address")
+        )
+        self.router.callback_query.register(
+            self.handle_order_phone_callback,
+            F.data.startswith("order:phone")
+        )
+        self.router.callback_query.register(
+            self.handle_order_time_callback,
+            F.data.startswith("order:time")
+        )
+        self.router.callback_query.register(
+            self.handle_order_comment_callback,
+            F.data.startswith("order:comment")
+        )
+        self.router.callback_query.register(
+            self.handle_order_promo_callback,
+            F.data.startswith("order:promo")
+        )
         self.router.callback_query.register(
             self.handle_order_type_callback,
             F.data.startswith("order:type")
@@ -39,12 +78,16 @@ class OrderHandler(BaseHandler):
             self.handle_order_confirm_callback,
             F.data.startswith("order:confirm")
         )
+        self.router.callback_query.register(
+            self.handle_order_edit_callback,
+            F.data.startswith("order:edit")
+        )
         # Generic 'order' entry point from main menu
         self.router.callback_query.register(
             self.handle_order_callback,
             F.data == "order"
         )
-        # Back and cancel actions on payment selection
+        # Back and cancel actions
         self.router.callback_query.register(
             self.handle_order_back_callback,
             F.data == "order:back"
@@ -59,6 +102,25 @@ class OrderHandler(BaseHandler):
         if data is None:
             data = {}
         user_id = data.get("user_id", message.from_user.id)
+        
+        # Check if cafe is open
+        from app.config import get_settings
+        from shared.utils.helpers import is_working_hours
+        from infrastructure.telegram.keyboards.main_keyboard import MainKeyboard
+        
+        settings = get_settings()
+        if not is_working_hours(settings.cafe_working_hours):
+            closed_message = MessageFormatter.format_closed_message(
+                cafe_name=settings.cafe_name,
+                working_hours=settings.cafe_working_hours,
+                cafe_address=settings.cafe_address,
+                cafe_phone=settings.cafe_phone
+            )
+            await message.answer(
+                text=closed_message,
+                reply_markup=MainKeyboard.get_back_to_main()
+            )
+            return
         
         # Get cart service
         session = data.get("session")
@@ -78,11 +140,8 @@ class OrderHandler(BaseHandler):
             )
             return
         
-        # Show order type selection
-        await message.answer(
-            text="🚚 <b>Оформление заказа</b>\n\nВыберите способ получения:",
-            reply_markup=CartKeyboard.get_order_type_keyboard()
-        )
+        # Start order flow
+        await self.helpers._show_order_type_selection(message, user_id, data)
         
         self.logger.info(
             "Order command handled",
@@ -100,6 +159,27 @@ class OrderHandler(BaseHandler):
         
         # Entry point from main menu ("order")
         if callback_data == "order":
+            # Check if cafe is open
+            from app.config import get_settings
+            from shared.utils.helpers import is_working_hours
+            from infrastructure.telegram.keyboards.main_keyboard import MainKeyboard
+            
+            settings = get_settings()
+            if not is_working_hours(settings.cafe_working_hours):
+                closed_message = MessageFormatter.format_closed_message(
+                    cafe_name=settings.cafe_name,
+                    working_hours=settings.cafe_working_hours,
+                    cafe_address=settings.cafe_address,
+                    cafe_phone=settings.cafe_phone
+                )
+                await self.safe_edit_message(
+                    callback.message,
+                    text=closed_message,
+                    reply_markup=MainKeyboard.get_back_to_main()
+                )
+                await callback.answer()
+                return
+            
             # Ensure cart exists
             if session is None:
                 cart_service = await get_cart_service(data)
@@ -114,33 +194,79 @@ class OrderHandler(BaseHandler):
                     reply_markup=CartKeyboard.get_empty_cart_keyboard()
                 )
             else:
-                await self.safe_edit_message(
-                    callback.message,
-                    text="🚚 <b>Оформление заказа</b>\n\nВыберите способ получения:",
-                    reply_markup=CartKeyboard.get_order_type_keyboard()
-                )
+                # Start order flow
+                await self.helpers._show_order_type_selection(callback, user_id, data)
             await callback.answer()
             return
         
         # Fallback actions (e.g., order:back)
         action = CallbackParser.get_action(callback_data)
         if action == "back":
+            # Handle back navigation based on current state
+            await self._handle_back_navigation(callback, user_id, data)
+        
+        await callback.answer()
+    
+    async def _handle_back_navigation(self, callback: CallbackQuery, user_id: int, data: Dict[str, Any]) -> None:
+        """Handle back navigation based on current state."""
+        order_state_service = await get_order_state_service()
+        current_state = order_state_service.get_state(user_id)
+        
+        if current_state == OrderState.SELECTING_ORDER_TYPE:
             # Go back to cart
+            session = data.get("session")
             if session is None:
                 cart_service = await get_cart_service(data)
             else:
                 from app.dependencies import container
                 cart_service = container.get_cart_service(session)
             cart = await cart_service.get_or_create_cart(user_id)
-            from infrastructure.telegram.utils.message_formatter import MessageFormatter
             cart_text = MessageFormatter.format_cart_message(cart)
             await self.safe_edit_message(
                 callback.message,
                 text=cart_text,
                 reply_markup=CartKeyboard.get_cart_keyboard(cart)
             )
-        
-        await callback.answer()
+        elif current_state == OrderState.SELECTING_ADDRESS_SUGGESTION:
+            # Go back to address input
+            await self.helpers._show_address_input(callback, user_id, data)
+        elif current_state == OrderState.ENTERING_DELIVERY_ADDRESS:
+            # Go back to payment method selection
+            await self.helpers._show_payment_method_selection(callback, user_id, data)
+        elif current_state == OrderState.ENTERING_DELIVERY_PHONE:
+            # Go back to address input
+            await self.helpers._show_address_input(callback, user_id, data)
+        elif current_state == OrderState.SELECTING_ORDER_TIME:
+            # Go back to phone input (if delivery) or payment method (if pickup)
+            context = order_state_service.get_context_data(user_id)
+            if context.order_type == "delivery":
+                await self.helpers._show_delivery_phone_input(callback, user_id, data)
+            else:
+                await self.helpers._show_payment_method_selection(callback, user_id, data)
+        elif current_state == OrderState.ENTERING_SCHEDULED_TIME:
+            # Go back to time selection
+            await self.helpers._show_order_time_selection(callback, user_id, data)
+        elif current_state == OrderState.ENTERING_ORDER_COMMENT:
+            # Go back to time selection
+            await self.helpers._show_order_time_selection(callback, user_id, data)
+        elif current_state == OrderState.CONFIRMING_ORDER:
+            # Go back to comment selection
+            await self.helpers._show_comment_selection(callback, user_id, data)
+        else:
+            # Default: go back to cart
+            session = data.get("session")
+            if session is None:
+                cart_service = await get_cart_service(data)
+            else:
+                from app.dependencies import container
+                cart_service = container.get_cart_service(session)
+            cart = await cart_service.get_or_create_cart(user_id)
+            cart_text = MessageFormatter.format_cart_message(cart)
+            await self.safe_edit_message(
+                callback.message,
+                text=cart_text,
+                reply_markup=CartKeyboard.get_cart_keyboard(cart)
+            )
     
     async def handle_order_type_callback(self, callback: CallbackQuery, **kwargs) -> None:
         """Handle order type selection."""
@@ -156,15 +282,13 @@ class OrderHandler(BaseHandler):
             await callback.answer("❌ Ошибка: неверный тип заказа")
             return
         
-        # Store order type in user data (in real app, use Redis or database)
-        # For now, we'll pass it through the callback data
+        # Store order type in context
+        order_state_service = await get_order_state_service()
+        context = order_state_service.get_context_data(user_id)
+        context.set_order_type(order_type)
         
         # Show payment method selection
-        await self.safe_edit_message(
-            callback.message,
-            text="💳 <b>Способ оплаты</b>\n\nВыберите способ оплаты:",
-            reply_markup=CartKeyboard.get_payment_method_keyboard()
-        )
+        await self.helpers._show_payment_method_selection(callback, user_id, data)
         
         await callback.answer()
         
@@ -187,46 +311,18 @@ class OrderHandler(BaseHandler):
             await callback.answer("❌ Ошибка: неверный способ оплаты")
             return
         
-        # Get cart service
-        session = data.get("session")
-        if session is None:
-            cart_service = await get_cart_service(data)
+        # Store payment method in context
+        order_state_service = await get_order_state_service()
+        context = order_state_service.get_context_data(user_id)
+        context.set_payment_method(payment_method)
+        
+        # Check if delivery is selected
+        if context.order_type == "delivery":
+            # Show address input
+            await self.helpers._show_address_input(callback, user_id, data)
         else:
-            from app.dependencies import container
-            cart_service = container.get_cart_service(session)
-        
-        # Get user's cart
-        cart = await cart_service.get_or_create_cart(user_id)
-        
-        if cart.is_empty():
-            await callback.answer("❌ Корзина пуста")
-            return
-        
-        # Format order confirmation
-        order_text = f"📋 <b>Подтверждение заказа</b>\n\n"
-        order_text += f"🛒 <b>Товары:</b>\n"
-        
-        from infrastructure.telegram.utils.message_formatter import MessageFormatter
-        from shared.utils.formatters import format_price
-        for item in cart.get_items_list():
-            order_text += f"• {item.name} x{item.quantity} - {format_price(item.price * item.quantity)}\n"
-        
-        order_text += f"\n💰 <b>Итого:</b> {cart.total_price // 100}₽\n"
-        order_text += f"💳 <b>Оплата:</b> {payment_method}\n"
-        
-        if payment_method == "online":
-            order_text += "\n⚠️ После подтверждения заказа вы будете перенаправлены на страницу оплаты."
-        elif payment_method == "cash":
-            order_text += "\n💵 Оплата наличными при получении."
-        elif payment_method == "card":
-            order_text += "\n💳 Оплата картой при получении."
-        
-        # Show order confirmation
-        await self.safe_edit_message(
-            callback.message,
-            text=order_text,
-            reply_markup=CartKeyboard.get_order_confirmation_keyboard()
-        )
+            # Pickup - go directly to time selection
+            await self.helpers._show_order_time_selection(callback, user_id, data)
         
         await callback.answer()
         
@@ -250,6 +346,11 @@ class OrderHandler(BaseHandler):
         data = kwargs.get("data", {})
         session = data.get("session")
         user_id = data.get("user_id", callback.from_user.id)
+        
+        # Reset order context
+        order_state_service = await get_order_state_service()
+        order_state_service.reset_context(user_id)
+        
         if session is None:
             cart_service = await get_cart_service(data)
         else:
@@ -274,10 +375,14 @@ class OrderHandler(BaseHandler):
         if session is None:
             order_service = await get_order_service(data)
             cart_service = await get_cart_service(data)
+            user_service = await get_user_service(data)
+            notification_service = await get_notification_service(data)
         else:
             from app.dependencies import container
             order_service = container.get_order_service(session)
             cart_service = container.get_cart_service(session)
+            user_service = container.get_user_service(session)
+            notification_service = container.get_notification_service(session)
         
         try:
             # Get user's cart
@@ -287,17 +392,33 @@ class OrderHandler(BaseHandler):
                 await callback.answer("❌ Корзина пуста")
                 return
             
-            # Create order
+            # Get order context
+            order_state_service = await get_order_state_service()
+            context = order_state_service.get_context_data(user_id)
+            
+            # Create order with context data
             order = await order_service.create_order(
                 user_id=user_id,
                 cart=cart,
-                order_type="delivery",  # TODO: Get from user data
-                payment_method="online",  # TODO: Get from user data
-                comment=None  # TODO: Get from user input
+                order_type=context.order_type or "pickup",
+                payment_method=context.payment_method or "cash",
+                comment=context.comment
             )
             
-            # Clear cart
+            # Clear cart and reset order context
             await cart_service.clear_cart(user_id)
+            order_state_service.reset_context(user_id)
+            
+            # Send notifications
+            try:
+                user = await user_service.get_user_by_id(order.user_id)
+                if user:
+                    # Notify user about order creation
+                    await notification_service.send_order_status_notification(order, user, None)
+                    # Notify admin about new order
+                    await notification_service.send_admin_new_order_notification(order, user)
+            except Exception as e:
+                self.logger.error(f"Failed to send notifications: {e}")
             
             # Send order confirmation
             order_text = MessageFormatter.format_order_confirmation(order)
@@ -326,3 +447,177 @@ class OrderHandler(BaseHandler):
             )
         
         await callback.answer()
+    
+    async def handle_order_text_message(self, message: Message, data: Dict[str, Any] = None) -> None:
+        """Handle text messages during order flow."""
+        if data is None:
+            data = {}
+        
+        user_id = data.get("user_id", message.from_user.id)
+        text = message.text
+        
+        # Get order state service
+        order_state_service = await get_order_state_service()
+        current_state = order_state_service.get_state(user_id)
+        
+        # Only process if user is in order flow
+        if current_state == OrderState.IDLE:
+            return
+        
+        try:
+            if current_state == OrderState.ENTERING_DELIVERY_ADDRESS:
+                await self.helpers._handle_address_input(message, text, user_id, data)
+            elif current_state == OrderState.ENTERING_DELIVERY_PHONE:
+                await self.helpers._handle_phone_input(message, text, user_id, data)
+            elif current_state == OrderState.ENTERING_SCHEDULED_TIME:
+                await self.helpers._handle_time_input(message, text, user_id, data)
+            elif current_state == OrderState.ENTERING_ORDER_COMMENT:
+                await self.helpers._handle_comment_input(message, text, user_id, data)
+            elif current_state == OrderState.ENTERING_PROMO_CODE:
+                await self.helpers._handle_promo_code_input(message, user_id, data)
+        except Exception as e:
+            self.logger.error(f"Error handling order text message: {e}")
+            await message.answer("❌ Произошла ошибка. Попробуйте еще раз.")
+    
+    async def handle_order_address_callback(self, callback: CallbackQuery, data: Dict[str, Any] = None) -> None:
+        """Handle address selection callbacks."""
+        if data is None:
+            data = {}
+        
+        user_id = data.get("user_id", callback.from_user.id)
+        callback_data = callback.data
+        
+        # Parse callback data
+        parts = callback_data.split(":")
+        if len(parts) < 3:
+            await callback.answer("❌ Ошибка: неверные данные")
+            return
+        
+        action = parts[2]
+        
+        try:
+            if action == "select":
+                # User selected an address suggestion
+                suggestion_index = int(parts[3])
+                await self.helpers._handle_address_selection(callback, suggestion_index, user_id, data)
+            elif action == "manual":
+                # User wants to enter address manually
+                await self.helpers._handle_manual_address_input(callback, user_id, data)
+            elif action == "retry":
+                # User wants to try another address
+                await self.helpers._handle_address_retry(callback, user_id, data)
+        except Exception as e:
+            self.logger.error(f"Error handling address callback: {e}")
+            await callback.answer("❌ Произошла ошибка")
+    
+    async def handle_order_phone_callback(self, callback: CallbackQuery, data: Dict[str, Any] = None) -> None:
+        """Handle phone selection callbacks."""
+        if data is None:
+            data = {}
+        
+        user_id = data.get("user_id", callback.from_user.id)
+        callback_data = callback.data
+        
+        # Parse callback data
+        parts = callback_data.split(":")
+        if len(parts) < 3:
+            await callback.answer("❌ Ошибка: неверные данные")
+            return
+        
+        action = parts[2]
+        
+        try:
+            if action == "use_my":
+                # Use user's phone number
+                phone = callback.from_user.phone_number or "Не указан"
+                await self.helpers._handle_phone_selection(callback, phone, user_id, data)
+            elif action == "manual":
+                # User wants to enter phone manually
+                await self.helpers._handle_manual_phone_input(callback, user_id, data)
+        except Exception as e:
+            self.logger.error(f"Error handling phone callback: {e}")
+            await callback.answer("❌ Произошла ошибка")
+    
+    async def handle_order_time_callback(self, callback: CallbackQuery, data: Dict[str, Any] = None) -> None:
+        """Handle time selection callbacks."""
+        if data is None:
+            data = {}
+        
+        user_id = data.get("user_id", callback.from_user.id)
+        callback_data = callback.data
+        
+        # Parse callback data
+        parts = callback_data.split(":")
+        if len(parts) < 3:
+            await callback.answer("❌ Ошибка: неверные данные")
+            return
+        
+        action = parts[2]
+        
+        try:
+            if action == "asap":
+                # As soon as possible
+                await self.helpers._handle_time_selection(callback, "asap", None, user_id, data)
+            elif action == "scheduled":
+                # Scheduled time
+                await self.helpers._handle_scheduled_time_input(callback, user_id, data)
+        except Exception as e:
+            self.logger.error(f"Error handling time callback: {e}")
+            await callback.answer("❌ Произошла ошибка")
+    
+    async def handle_order_comment_callback(self, callback: CallbackQuery, data: Dict[str, Any] = None) -> None:
+        """Handle comment selection callbacks."""
+        if data is None:
+            data = {}
+        
+        user_id = data.get("user_id", callback.from_user.id)
+        callback_data = callback.data
+        
+        # Parse callback data
+        parts = callback_data.split(":")
+        if len(parts) < 3:
+            await callback.answer("❌ Ошибка: неверные данные")
+            return
+        
+        action = parts[2]
+        
+        try:
+            if action == "add":
+                # User wants to add comment
+                await self.helpers._handle_comment_input_request(callback, user_id, data)
+            elif action == "skip":
+                # User wants to skip comment
+                await self.helpers._handle_comment_selection(callback, None, user_id, data)
+        except Exception as e:
+            self.logger.error(f"Error handling comment callback: {e}")
+            await callback.answer("❌ Произошла ошибка")
+    
+    async def handle_order_promo_callback(self, callback: CallbackQuery, data: Dict[str, Any] = None) -> None:
+        """Handle promo code selection callbacks."""
+        if data is None:
+            data = {}
+        
+        user_id = data.get("user_id", callback.from_user.id)
+        
+        try:
+            await self.helpers._handle_promo_code_callback(callback, user_id, data)
+        except Exception as e:
+            self.logger.error(f"Error handling promo callback: {e}")
+            await callback.answer("❌ Произошла ошибка")
+    
+    async def handle_order_edit_callback(self, callback: CallbackQuery, data: Dict[str, Any] = None) -> None:
+        """Handle order edit callback."""
+        if data is None:
+            data = {}
+        
+        user_id = data.get("user_id", callback.from_user.id)
+        
+        try:
+            # Reset to order type selection
+            order_state_service = await get_order_state_service()
+            order_state_service.set_state(user_id, OrderState.SELECTING_ORDER_TYPE)
+            
+            await self.helpers._show_order_type_selection(callback, user_id, data)
+        except Exception as e:
+            self.logger.error(f"Error handling edit callback: {e}")
+            await callback.answer("❌ Произошла ошибка")

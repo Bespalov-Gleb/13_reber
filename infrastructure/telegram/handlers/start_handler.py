@@ -37,6 +37,10 @@ class StartHandler(BaseHandler):
             self.handle_support_callback,
             F.data == "support"
         )
+        self.router.callback_query.register(
+            self.handle_booking_callback,
+            F.data == "booking"
+        )
     
     async def handle_start_command(self, message: Message, data: Dict[str, Any] = None) -> None:
         """Handle /start command."""
@@ -181,5 +185,15 @@ class StartHandler(BaseHandler):
                 InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")
             ]
         ])
+        await self.safe_edit_message(callback.message, text=text, reply_markup=keyboard)
+        await callback.answer()
+
+    async def handle_booking_callback(self, callback, **kwargs) -> None:
+        """Handle booking callback."""
+        from infrastructure.telegram.keyboards.booking_keyboard import BookingKeyboard
+        
+        text = "🪑 <b>Бронирование столика</b>\n\nВыберите количество гостей:"
+        keyboard = BookingKeyboard.get_guests_count_keyboard()
+        
         await self.safe_edit_message(callback.message, text=text, reply_markup=keyboard)
         await callback.answer()

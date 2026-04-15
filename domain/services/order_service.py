@@ -120,6 +120,7 @@ class OrderService:
         order_type: str,
         payment_method: str,
         comment: Optional[str] = None,
+        send_to_iiko: bool = True,
     ) -> Order:
         """Create order from cart (simplified version)."""
         internal_user_id = await self._ensure_user(user_id)
@@ -155,7 +156,16 @@ class OrderService:
             order.items.append(order_item)
         
         # Save order
-        return await self.order_repository.create(order)
+        saved_order = await self.order_repository.create(order)
+        
+        # Log to Google Sheets
+        await self._log_order_to_sheets(saved_order)
+        
+        # Send to iiko if enabled
+        if send_to_iiko:
+            await self._send_order_to_iiko(saved_order)
+        
+        return saved_order
     
     async def get_order(self, order_id: str) -> Optional[Order]:
         """Get order by ID."""
@@ -171,7 +181,32 @@ class OrderService:
         if not order:
             raise ValueError(f"Order with id {order_id} not found")
         
+        old_status = order.status.value
         order.status = status
+        order.updated_at = datetime.now()
+        
+        updated_order = await self.order_repository.update(order)
+        
+        # Log status change to Google Sheets
+        await self._log_status_change_to_sheets(order_id, old_status, status.value)
+        
+        # Send review request for completed orders
+        if status in [OrderStatus.DELIVERED, OrderStatus.PICKED_UP]:
+            await self._send_review_request(updated_order)
+        
+        return updated_order
+    
+    async def update_order(self, order_id: str, **kwargs) -> Order:
+        """Update order fields."""
+        order = await self.order_repository.get_by_id(order_id)
+        if not order:
+            raise ValueError(f"Order with id {order_id} not found")
+        
+        # Update fields
+        for key, value in kwargs.items():
+            if hasattr(order, key):
+                setattr(order, key, value)
+        
         order.updated_at = datetime.now()
         
         return await self.order_repository.update(order)
@@ -224,3 +259,108 @@ class OrderService:
     async def get_orders_by_user_id(self, user_id: str) -> List[Order]:
         """Get orders by user ID."""
         return await self.order_repository.get_orders_by_user_id(user_id)
+    
+    async def _log_order_to_sheets(self, order: Order) -> None:
+        """Log order to Google Sheets."""
+        try:
+            from app.config import get_settings
+            settings = get_settings()
+            
+            if not settings.google_sheets_credentials_file or not settings.google_sheets_spreadsheet_id:
+                return
+            
+            from infrastructure.external.crm.google_sheets import GoogleSheetsIntegration
+            
+            sheets = GoogleSheetsIntegration(
+                credentials_file=settings.google_sheets_credentials_file,
+                spreadsheet_id=settings.google_sheets_spreadsheet_id
+            )
+            
+            # Get user info
+            user = await self.user_repository.get_by_id(order.user_id)
+            
+            # Prepare order data
+            order_data = {
+                "order_id": order.order_id,
+                "user_id": order.user_id,
+                "user_name": f"{user.first_name or ''} {user.last_name or ''}".strip() if user else "",
+                "user_phone": user.phone if user else "",
+                "user_telegram_id": user.telegram_id if user else "",
+                "order_type": order.order_type.value,
+                "payment_method": order.payment_method.value,
+                "status": order.status.value,
+                "total_amount": order.total,
+                "items_count": len(order.items),
+                "delivery_address": order.delivery_info.address if order.delivery_info else "",
+                "delivery_phone": order.delivery_info.phone if order.delivery_info else "",
+                "comment": order.comment or "",
+                "created_at": order.created_at.isoformat(),
+                "updated_at": order.updated_at.isoformat()
+            }
+            
+            await sheets.log_order(order_data)
+            
+        except Exception as e:
+            print(f"❌ Failed to log order to Google Sheets: {e}")
+    
+    async def _log_status_change_to_sheets(self, order_id: str, old_status: str, new_status: str) -> None:
+        """Log order status change to Google Sheets."""
+        try:
+            from app.config import get_settings
+            settings = get_settings()
+            
+            if not settings.google_sheets_credentials_file or not settings.google_sheets_spreadsheet_id:
+                return
+            
+            from infrastructure.external.crm.google_sheets import GoogleSheetsIntegration
+            
+            sheets = GoogleSheetsIntegration(
+                credentials_file=settings.google_sheets_credentials_file,
+                spreadsheet_id=settings.google_sheets_spreadsheet_id
+            )
+            
+            await sheets.log_order_status_change(
+                order_id=order_id,
+                old_status=old_status,
+                new_status=new_status,
+                timestamp=datetime.now().isoformat()
+            )
+            
+        except Exception as e:
+            print(f"❌ Failed to log status change to Google Sheets: {e}")
+    
+    async def _send_review_request(self, order: Order) -> None:
+        """Send review request notification."""
+        try:
+            # Get user info
+            user = await self.user_repository.get_by_id(order.user_id)
+            if not user:
+                return
+            
+            # Get notification service
+            from app.dependencies import get_notification_service
+            notification_service = await get_notification_service()
+            
+            # Send review request
+            await notification_service.send_review_request_notification(order, user)
+            
+        except Exception as e:
+            print(f"❌ Failed to send review request: {e}")
+    
+    async def _send_order_to_iiko(self, order: Order) -> None:
+        """Send order to iiko system."""
+        try:
+            from app.dependencies import get_iiko_sync_service
+            
+            sync_service = await get_iiko_sync_service()
+            if sync_service:
+                success = await sync_service.send_order_to_iiko(order)
+                if success:
+                    print(f"✅ Order {order.order_id} sent to iiko successfully")
+                else:
+                    print(f"❌ Failed to send order {order.order_id} to iiko")
+            else:
+                print("⚠️ iiko sync service not available")
+                
+        except Exception as e:
+            print(f"❌ Failed to send order to iiko: {e}")

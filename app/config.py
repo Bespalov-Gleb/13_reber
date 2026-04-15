@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     # CRM Integration
     iiko_api_url: str = Field("https://api-ru.iiko.services", description="iiko API URL")
     iiko_api_login: str | None = Field(None, description="iiko API login")
-    iiko_api_password: str | None = Field(None, description="iiko API password")
+    iiko_organization_id: str | None = Field(None, description="iiko organization ID")
     google_sheets_credentials_file: str | None = Field(None, description="Google Sheets credentials file")
     google_sheets_spreadsheet_id: str | None = Field(None, description="Google Sheets spreadsheet ID")
     

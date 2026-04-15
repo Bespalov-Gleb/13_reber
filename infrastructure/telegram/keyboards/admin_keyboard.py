@@ -30,6 +30,15 @@ class AdminKeyboard(BaseKeyboard):
                 InlineKeyboardButton(text="📢 Уведомления", callback_data="admin:notifications"),
             ],
             [
+                InlineKeyboardButton(text="🪑 Бронирования", callback_data="admin_bookings:menu"),
+            ],
+            [
+                InlineKeyboardButton(text="🍽️ iiko CRM", callback_data="admin_iiko:menu"),
+            ],
+            [
+                InlineKeyboardButton(text="🚚 Курьеры", callback_data="admin_couriers:menu"),
+            ],
+            [
                 InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu"),
             ]
         ]
@@ -479,6 +488,12 @@ class AdminKeyboard(BaseKeyboard):
                 InlineKeyboardButton(text="✅ Доставлен", callback_data=f"order_delivered:{order.order_id}"),
             ])
         
+        # Courier assignment button (if order is ready for delivery and no courier assigned)
+        if order.order_type.value == "delivery" and order.status.value in ["ready", "delivery"] and not order.courier_id:
+            buttons.append([
+                InlineKeyboardButton(text="🚚 Назначить курьера", callback_data=f"order_assign_courier:{order.order_id}"),
+            ])
+        
         # Back button
         buttons.append([
             InlineKeyboardButton(text="🔙 К списку заказов", callback_data="admin:orders")
@@ -724,6 +739,41 @@ class AdminKeyboard(BaseKeyboard):
             ],
             [
                 InlineKeyboardButton(text="🔙 Назад", callback_data="admin:notifications")
+            ]
+        ]
+        return BaseKeyboard.create_inline_keyboard(buttons)
+    
+    @staticmethod
+    def get_bookings_management_keyboard() -> InlineKeyboardMarkup:
+        """Get bookings management keyboard."""
+        buttons = [
+            [
+                InlineKeyboardButton(text="📅 Все бронирования", callback_data="admin_bookings:list_all"),
+                InlineKeyboardButton(text="📅 На сегодня", callback_data="admin_bookings:today"),
+            ],
+            [
+                InlineKeyboardButton(text="⏳ Ожидающие", callback_data="admin_bookings:pending"),
+            ],
+            [
+                InlineKeyboardButton(text="🔙 Назад", callback_data="admin"),
+            ]
+        ]
+        return BaseKeyboard.create_inline_keyboard(buttons)
+    
+    @staticmethod
+    def get_iiko_management_keyboard() -> InlineKeyboardMarkup:
+        """Get iiko management keyboard."""
+        buttons = [
+            [
+                InlineKeyboardButton(text="🔄 Синхронизировать меню", callback_data="admin_iiko:sync_menu"),
+                InlineKeyboardButton(text="📊 Статус подключения", callback_data="admin_iiko:test_connection"),
+            ],
+            [
+                InlineKeyboardButton(text="📋 Синхронизировать заказы", callback_data="admin_iiko:sync_orders"),
+                InlineKeyboardButton(text="⚙️ Настройки", callback_data="admin_iiko:settings"),
+            ],
+            [
+                InlineKeyboardButton(text="🔙 Назад", callback_data="admin"),
             ]
         ]
         return BaseKeyboard.create_inline_keyboard(buttons)

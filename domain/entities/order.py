@@ -26,6 +26,7 @@ class Order:
         delivery_info: Optional[DeliveryInfo] = None,
         pickup_info: Optional[PickupInfo] = None,
         comment: Optional[str] = None,
+        courier_id: Optional[str] = None,
         timeline: Optional[OrderTimeline] = None,
         created_at: Optional[datetime] = None,
         updated_at: Optional[datetime] = None,
@@ -44,6 +45,7 @@ class Order:
         self.delivery_info = delivery_info
         self.pickup_info = pickup_info
         self.comment = comment
+        self.courier_id = courier_id
         self.timeline = timeline or OrderTimeline(created_at=created_at or datetime.now())
         self.created_at = created_at or datetime.now()
         self.updated_at = updated_at or datetime.now()
