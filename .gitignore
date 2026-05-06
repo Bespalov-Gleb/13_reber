@@ -207,6 +207,11 @@ service-account.json
 *.pem
 *.key
 *.crt
+secrets/
+config.env
+config.env.*
+*.env
+*.env.*
 
 # Media files (menu images)
 media/

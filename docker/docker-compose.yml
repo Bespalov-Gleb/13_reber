@@ -5,17 +5,19 @@ services:
   postgres:
     image: postgres:15-alpine
     container_name: cafe_bot_postgres
+    env_file:
+      - ../.env
     environment:
-      POSTGRES_DB: cafe_bot
-      POSTGRES_USER: cafe_user
-      POSTGRES_PASSWORD: cafe_password
+      POSTGRES_DB: ${POSTGRES_DB:-cafe_bot}
+      POSTGRES_USER: ${POSTGRES_USER:-cafe_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cafe_password}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U cafe_user -d cafe_bot"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cafe_user} -d ${POSTGRES_DB:-cafe_bot}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -25,7 +27,7 @@ services:
     image: redis:7-alpine
     container_name: cafe_bot_redis
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -40,11 +42,12 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
     container_name: cafe_bot_app
+    env_file:
+      - ../.env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://cafe_user:cafe_password@postgres:5432/cafe_bot
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-cafe_user}:${POSTGRES_PASSWORD:-cafe_password}@postgres:5432/${POSTGRES_DB:-cafe_bot}
       - REDIS_URL=redis://redis:6379/0
-      - BOT_TOKEN=${BOT_TOKEN}
-      - ENVIRONMENT=development
+      - ENVIRONMENT=${ENVIRONMENT:-development}
     volumes:
       - ../:/app
       - bot_logs:/app/logs
@@ -55,6 +58,9 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    command: >
+      sh -c "python init_db.py &&
+             python -m app.main"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]

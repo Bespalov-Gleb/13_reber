@@ -54,14 +54,19 @@ class IikoCRMProvider(BaseCRMProvider):
     
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Async context manager exit."""
-        if self.session:
-            await self.session.close()
+        await self.close()
     
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create HTTP session."""
         if not self.session:
             self.session = aiohttp.ClientSession()
         return self.session
+
+    async def close(self) -> None:
+        """Close underlying HTTP session safely."""
+        if self.session and not self.session.closed:
+            await self.session.close()
+        self.session = None
     
     async def _authenticate(self) -> bool:
         """Authenticate with iiko API and get access token."""
@@ -423,8 +428,14 @@ class IikoCRMProvider(BaseCRMProvider):
         order_type_key = "delivery" if order.order_type.value == "delivery" else "pickup"
         order_type_id = self._order_type_ids.get(order_type_key)
         if not order_type_id:
-            self.logger.error(f"Order type id not found for '{order_type_key}'")
-            return None
+            fallback_order_type_id = self._order_type_ids.get("delivery")
+            if not fallback_order_type_id:
+                self.logger.error(f"Order type id not found for '{order_type_key}'")
+                return None
+            self.logger.warning(
+                f"Order type id not found for '{order_type_key}', fallback to delivery order type"
+            )
+            order_type_id = fallback_order_type_id
 
         payment_method_key = order.payment_method.value
         payment_type_id = self._payment_type_ids.get(payment_method_key)

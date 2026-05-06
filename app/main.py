@@ -74,10 +74,8 @@ async def health_check(request: web.Request) -> web.Response:
     return web.json_response({"status": "ok", "service": "cafe-bot"})
 
 
-def create_app() -> web.Application:
+def create_app(bot: Bot, dp: Dispatcher, settings) -> web.Application:
     """Create and configure web application."""
-    settings = get_settings()
-
     app = web.Application()
     app.router.add_get("/health", health_check)
 
@@ -88,9 +86,6 @@ def create_app() -> web.Application:
 
     # Setup webhook handler if in production
     if settings.is_production and settings.bot_webhook_url:
-        bot = app["bot"]
-        dp = app["dispatcher"]
-
         webhook_handler = SimpleRequestHandler(
             dispatcher=dp,
             bot=bot,
@@ -104,11 +99,26 @@ def create_app() -> web.Application:
 async def main():
     """Main function."""
     settings = get_settings()
+    setup_logging(settings.log_level, settings.log_format)
 
     if settings.is_production:
         # Production mode with webhook
-        app = create_app()
-        setup_application(app, app["dispatcher"], bot=app["bot"])
+        await init_database(settings.database_url)
+        bot = create_bot(settings.bot_token)
+        dp = create_dispatcher()
+
+        from app.background_tasks import background_task_manager
+        await background_task_manager.start()
+
+        if settings.bot_webhook_url:
+            webhook_url = f"{settings.bot_webhook_url}{settings.bot_webhook_path}"
+            await bot.set_webhook(
+                url=webhook_url,
+                secret_token=settings.webhook_secret
+            )
+
+        app = create_app(bot, dp, settings)
+        setup_application(app, dp, bot=bot)
 
         runner = web.AppRunner(app)
         await runner.setup()
@@ -124,6 +134,10 @@ async def main():
         except KeyboardInterrupt:
             pass
         finally:
+            await background_task_manager.stop()
+            if settings.bot_webhook_url:
+                await bot.delete_webhook()
+            await bot.session.close()
             await runner.cleanup()
     else:
         # Development mode with polling

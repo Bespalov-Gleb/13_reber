@@ -39,7 +39,7 @@ class CourierAdminKeyboard(BaseKeyboard):
             status_emoji = "🟢" if courier.is_active else "🔴"
             buttons.append([
                 InlineKeyboardButton(
-                    f"{status_emoji} {courier.full_name}",
+                    text=f"{status_emoji} {courier.full_name}",
                     callback_data=f"admin_couriers:view:{courier.user_id}"
                 )
             ])
@@ -51,7 +51,7 @@ class CourierAdminKeyboard(BaseKeyboard):
             if page > 0:
                 pagination_buttons.append(
                     InlineKeyboardButton(
-                        "⬅️",
+                        text="⬅️",
                         callback_data=f"admin_couriers:page:{page-1}"
                     )
                 )
@@ -59,7 +59,7 @@ class CourierAdminKeyboard(BaseKeyboard):
             if end_idx < len(couriers):
                 pagination_buttons.append(
                     InlineKeyboardButton(
-                        "➡️",
+                        text="➡️",
                         callback_data=f"admin_couriers:page:{page+1}"
                     )
                 )
@@ -84,7 +84,7 @@ class CourierAdminKeyboard(BaseKeyboard):
                 buttons.append([
                     InlineKeyboardButton(
                         text=f"🚚 {courier.full_name}",
-                        callback_data=f"admin_couriers:assign_to_order:{order_id}:{courier.user_id}"
+                        callback_data=f"admin_couriers:assign_to_order:{order_id}:{courier.telegram_id}"
                     )
                 ])
         
@@ -149,7 +149,7 @@ class CourierAdminKeyboard(BaseKeyboard):
                 buttons.append([
                     InlineKeyboardButton(
                         text=f"🚚 {courier.full_name}",
-                        callback_data=f"admin_couriers:assign_to_order:{order_id}:{courier.user_id}"
+                        callback_data=f"admin_couriers:assign_to_order:{order_id}:{courier.telegram_id}"
                     )
                 ])
         

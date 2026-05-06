@@ -111,9 +111,11 @@ class BookingService:
         available_slots = []
         start_time = time(10, 0)
         end_time = time(22, 0)
-        
-        current_time = start_time
-        while current_time <= end_time:
+        current_dt = datetime.combine(booking_date, start_time)
+        end_dt = datetime.combine(booking_date, end_time)
+
+        while current_dt <= end_dt:
+            current_time = current_dt.time()
             # Check if this time slot is available
             has_conflict = await self.booking_repository.check_booking_conflict(
                 booking_date, current_time, 1
@@ -122,8 +124,7 @@ class BookingService:
                 available_slots.append(current_time)
             
             # Add 2 hours
-            current_datetime = datetime.combine(booking_date, current_time) + timedelta(hours=2)
-            current_time = current_datetime.time()
+            current_dt += timedelta(hours=2)
         
         return available_slots
     

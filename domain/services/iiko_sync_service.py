@@ -28,6 +28,7 @@ class IikoSyncService:
         self.logger = logging.getLogger(__name__)
         self._sync_in_progress = False
         self._last_sync_time = None
+        self._last_error: Optional[str] = None
     
     async def sync_menu_from_iiko(self, force: bool = False) -> bool:
         """
@@ -41,6 +42,7 @@ class IikoSyncService:
         """
         if self._sync_in_progress:
             self.logger.warning("Menu sync already in progress")
+            self._last_error = "Синхронизация уже выполняется"
             return False
         
         # Check if sync is needed
@@ -48,9 +50,11 @@ class IikoSyncService:
             time_since_sync = datetime.now() - self._last_sync_time
             if time_since_sync < timedelta(minutes=30):  # Sync max once per 30 minutes
                 self.logger.info("Menu sync skipped - recently synced")
+                self._last_error = None
                 return True
         
         self._sync_in_progress = True
+        self._last_error = None
         
         try:
             self.logger.info("Starting menu sync from iiko")
@@ -58,18 +62,21 @@ class IikoSyncService:
             # Test connection first
             if not await self.iiko_provider.test_connection():
                 self.logger.error("Failed to connect to iiko")
+                self._last_error = "Не удалось подключиться к iiko (проверь IIKO_API_URL / IIKO_API_LOGIN)"
                 return False
             
             # Get categories from iiko
             iiko_categories = await self.iiko_provider.get_categories()
             if not iiko_categories:
                 self.logger.warning("No categories received from iiko")
+                self._last_error = "iiko вернул 0 категорий (проверь публикацию меню/групп в iiko)"
                 return False
             
             # Get menu items from iiko
             iiko_items = await self.iiko_provider.get_menu_items()
             if not iiko_items:
                 self.logger.warning("No menu items received from iiko")
+                self._last_error = "iiko вернул 0 блюд (проверь номенклатуру и принадлежность к группам)"
                 return False
             
             # Sync categories
@@ -79,14 +86,23 @@ class IikoSyncService:
             await self._sync_menu_items(iiko_items)
             
             self._last_sync_time = datetime.now()
+            self._last_error = None
             self.logger.info(f"Menu sync completed successfully: {len(iiko_categories)} categories, {len(iiko_items)} items")
             return True
             
         except Exception as e:
             self.logger.error(f"Menu sync failed: {e}")
+            self._last_error = str(e)
             return False
         finally:
             self._sync_in_progress = False
+            # Prevent aiohttp session leaks on repeated sync/test calls.
+            close = getattr(self.iiko_provider, "close", None)
+            if callable(close):
+                try:
+                    await close()
+                except Exception as close_error:
+                    self.logger.warning(f"Failed to close iiko provider session: {close_error}")
     
     async def _sync_categories(self, iiko_categories: List[Category]) -> None:
         """Sync categories from iiko."""
@@ -195,6 +211,13 @@ class IikoSyncService:
         except Exception as e:
             self.logger.error(f"Error sending order to iiko: {e}")
             return False
+        finally:
+            close = getattr(self.iiko_provider, "close", None)
+            if callable(close):
+                try:
+                    await close()
+                except Exception as close_error:
+                    self.logger.warning(f"Failed to close iiko provider session: {close_error}")
     
     async def get_order_status_from_iiko(self, order_id: str) -> Optional[str]:
         """
@@ -259,6 +282,13 @@ class IikoSyncService:
         except Exception as e:
             self.logger.error(f"Error testing iiko connection: {e}")
             return False
+        finally:
+            close = getattr(self.iiko_provider, "close", None)
+            if callable(close):
+                try:
+                    await close()
+                except Exception as close_error:
+                    self.logger.warning(f"Failed to close iiko provider session: {close_error}")
     
     def get_last_sync_time(self) -> Optional[datetime]:
         """Get last sync time."""
@@ -267,3 +297,7 @@ class IikoSyncService:
     def is_sync_in_progress(self) -> bool:
         """Check if sync is currently in progress."""
         return self._sync_in_progress
+
+    def get_last_error(self) -> Optional[str]:
+        """Get last synchronization error."""
+        return self._last_error

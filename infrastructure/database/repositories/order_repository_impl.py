@@ -99,8 +99,13 @@ class OrderRepositoryImpl(OrderRepository):
         db_order.status = order.status.value
         db_order.payment_status = order.payment_status.value if order.payment_status else None
         db_order.delivery_address = order.delivery_info.address if order.delivery_info else None
-        db_order.delivery_phone = order.delivery_info.phone if order.delivery_info else None
-        db_order.pickup_phone = order.pickup_info.phone if order.pickup_info else None
+        if order.delivery_info:
+            db_order.delivery_phone = order.delivery_info.phone
+        elif order.pickup_info:
+            # `orders` table has only one phone column; reuse for pickup contact.
+            db_order.delivery_phone = order.pickup_info.phone
+        else:
+            db_order.delivery_phone = None
         db_order.comment = order.comment
         db_order.courier_id = order.courier_id
         db_order.updated_at = datetime.now()
@@ -131,7 +136,9 @@ class OrderRepositoryImpl(OrderRepository):
         
         conditions = []
         
-        if filters.status:
+        if filters.statuses:
+            conditions.append(OrderModel.status.in_([status.value for status in filters.statuses]))
+        elif filters.status:
             conditions.append(OrderModel.status == filters.status.value)
         
         if filters.order_type:
@@ -228,7 +235,9 @@ class OrderRepositoryImpl(OrderRepository):
         if filters:
             conditions = []
             
-            if filters.status:
+            if filters.statuses:
+                conditions.append(OrderModel.status.in_([status.value for status in filters.statuses]))
+            elif filters.status:
                 conditions.append(OrderModel.status == filters.status.value)
             
             if filters.order_type:
@@ -337,10 +346,10 @@ class OrderRepositoryImpl(OrderRepository):
                 address=db_order.delivery_address,
                 phone=db_order.delivery_phone or ""
             )
-        elif db_order.order_type == OrderType.PICKUP.value and db_order.pickup_phone:
+        elif db_order.order_type == OrderType.PICKUP.value and db_order.delivery_phone:
             from shared.types.order_types import PickupInfo
             pickup_info = PickupInfo(
-                phone=db_order.pickup_phone
+                phone=db_order.delivery_phone
             )
         
         return Order(

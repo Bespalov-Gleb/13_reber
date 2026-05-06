@@ -12,9 +12,11 @@ class Settings(BaseSettings):
     """Application settings."""
     
     model_config = SettingsConfigDict(
-        env_file="cafe_bot/config.env",
+        # Prefer local .env, keep backward compatibility with old config.env
+        env_file=(".env", "config.env", "cafe_bot/.env", "cafe_bot/config.env"),
         env_file_encoding="utf-8",
         case_sensitive=False,
+        env_ignore_empty=True,
         extra="ignore"
     )
     
@@ -40,6 +42,8 @@ class Settings(BaseSettings):
     
     # Maps Services
     yandex_maps_api_key: str | None = Field(None, description="Yandex Maps API key")
+    yandex_geocoder_api_key: str | None = Field(None, description="Yandex Geocoder API key")
+    yandex_suggest_api_key: str | None = Field(None, description="Yandex Suggest API key")
     google_maps_api_key: str | None = Field(None, description="Google Maps API key")
     
     # CRM Integration
@@ -50,7 +54,8 @@ class Settings(BaseSettings):
     google_sheets_spreadsheet_id: str | None = Field(None, description="Google Sheets spreadsheet ID")
     
     # Admin Configuration
-    admin_user_ids: List[int] = Field(default_factory=list, description="Admin user IDs")
+    # Keep raw env as string to avoid pydantic complex JSON pre-decoding for List[int]
+    admin_user_ids_raw: str | None = Field(None, description="Raw admin user IDs from env", validation_alias="ADMIN_USER_IDS")
     admin_chat_id: int | None = Field(None, description="Admin chat ID")
     
     # Cafe Configuration
@@ -58,6 +63,8 @@ class Settings(BaseSettings):
     cafe_address: str = Field("", description="Cafe address")
     cafe_phone: str = Field("", description="Cafe phone")
     cafe_working_hours: str = Field("09:00-22:00", description="Cafe working hours")
+    cafe_latitude: float = Field(55.7558, description="Cafe latitude")
+    cafe_longitude: float = Field(37.6176, description="Cafe longitude")
     cafe_delivery_zone_radius: int = Field(5000, description="Delivery zone radius in meters")
     cafe_min_order_amount: int = Field(500, description="Minimum order amount in kopecks")
     
@@ -83,10 +90,10 @@ class Settings(BaseSettings):
         """Check if running in development environment."""
         return self.environment.lower() == "development"
 
-    # Normalize ADMIN_USER_IDS from env: supports "1,2", "[1,2]", 1
-    @field_validator("admin_user_ids", mode="before")
-    @classmethod
-    def _normalize_admin_user_ids(cls, value):
+    @property
+    def admin_user_ids(self) -> List[int]:
+        """Normalize ADMIN_USER_IDS: supports '1,2', '[1,2]', '1'."""
+        value = self.admin_user_ids_raw
         if value is None:
             return []
         # If already list -> return as is
@@ -119,6 +126,15 @@ class Settings(BaseSettings):
                 return []
         # Fallback
         return []
+
+    @field_validator("admin_chat_id", mode="before")
+    @classmethod
+    def _normalize_admin_chat_id(cls, value):
+        if value is None:
+            return None
+        if isinstance(value, str) and value.strip() == "":
+            return None
+        return value
 
 
 @lru_cache()

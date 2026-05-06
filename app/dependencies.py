@@ -205,9 +205,12 @@ class DIContainer:
     def get_maps_service(self) -> YandexMapsProvider:
         """Get maps service."""
         settings = get_settings()
-        if not settings.yandex_maps_api_key:
-            raise ValueError("Yandex Maps API key not configured")
-        return YandexMapsProvider(settings.yandex_maps_api_key)
+        geocoder_key = settings.yandex_geocoder_api_key or settings.yandex_maps_api_key
+        suggest_key = settings.yandex_suggest_api_key or settings.yandex_maps_api_key
+        if not geocoder_key:
+            raise ValueError("Yandex Geocoder API key not configured")
+        # Suggest can use dedicated key, with fallback to geocoder/general key.
+        return YandexMapsProvider(geocoder_api_key=geocoder_key, suggest_api_key=suggest_key)
 
 
 # Global container instance

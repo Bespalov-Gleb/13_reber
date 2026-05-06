@@ -69,6 +69,7 @@ class OrderFilters:
     """Order filters for queries."""
     
     status: Optional[OrderStatus] = None
+    statuses: Optional[list[OrderStatus]] = None
     order_type: Optional[OrderType] = None
     payment_method: Optional[PaymentMethod] = None
     payment_status: Optional[PaymentStatus] = None

@@ -11,17 +11,29 @@ from infrastructure.external.maps.base_maps import BaseMapsProvider
 class YandexMapsProvider(BaseMapsProvider):
     """Yandex Maps provider implementation."""
     
-    def __init__(self, api_key: str):
-        self.api_key = api_key
+    def __init__(self, geocoder_api_key: str, suggest_api_key: Optional[str] = None):
+        self.geocoder_api_key = geocoder_api_key
+        self.suggest_api_key = suggest_api_key or geocoder_api_key
         self.base_url = "https://geocode-maps.yandex.ru/1.x"
         self.suggest_url = "https://suggest-maps.yandex.ru/v1/suggest"
+
+    @staticmethod
+    def _extract_suggest_text(value: object) -> str:
+        """Normalize Yandex suggest title/subtitle to plain text."""
+        if isinstance(value, str):
+            return value.strip()
+        if isinstance(value, dict):
+            text = value.get("text")
+            if isinstance(text, str):
+                return text.strip()
+        return ""
     
     async def suggest_addresses(self, query: str, limit: int = 5) -> List[Dict[str, str]]:
         """Get address suggestions using Yandex Suggest API."""
         try:
             async with aiohttp.ClientSession() as session:
                 params = {
-                    "apikey": self.api_key,
+                    "apikey": self.suggest_api_key,
                     "text": query,
                     "lang": "ru_RU",
                     "results": limit,
@@ -35,13 +47,18 @@ class YandexMapsProvider(BaseMapsProvider):
                         
                         if "results" in data:
                             for result in data["results"]:
-                                if "title" in result and "subtitle" in result:
-                                    suggestions.append({
-                                        "title": result["title"],
-                                        "subtitle": result["subtitle"],
-                                        "full_address": f"{result['title']}, {result['subtitle']}",
-                                        "coordinates": result.get("coordinates", {})
-                                    })
+                                title = self._extract_suggest_text(result.get("title"))
+                                subtitle = self._extract_suggest_text(result.get("subtitle"))
+                                if not title:
+                                    continue
+
+                                full_address = title if not subtitle else f"{title}, {subtitle}"
+                                suggestions.append({
+                                    "title": title,
+                                    "subtitle": subtitle,
+                                    "full_address": full_address,
+                                    "coordinates": result.get("coordinates", {})
+                                })
                         
                         return suggestions
                     else:
@@ -55,7 +72,7 @@ class YandexMapsProvider(BaseMapsProvider):
         try:
             async with aiohttp.ClientSession() as session:
                 params = {
-                    "apikey": self.api_key,
+                    "apikey": self.geocoder_api_key,
                     "geocode": address,
                     "format": "json",
                     "results": 1
@@ -82,7 +99,7 @@ class YandexMapsProvider(BaseMapsProvider):
         try:
             async with aiohttp.ClientSession() as session:
                 params = {
-                    "apikey": self.api_key,
+                    "apikey": self.geocoder_api_key,
                     "geocode": f"{longitude},{latitude}",
                     "format": "json",
                     "results": 1

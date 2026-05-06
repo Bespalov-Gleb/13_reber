@@ -13,7 +13,9 @@ from shared.types.admin_states import AdminState
 from shared.utils.helpers import generate_id
 from domain.entities.category import Category
 from domain.entities.menu_item import MenuItem
-from app.dependencies import get_menu_service
+from app.dependencies import get_menu_service, get_user_service
+from shared.types.user_types import UserRole
+from shared.services.notification_templates import set_notification_template
 
 
 class AdminHandlerExtensions:
@@ -77,6 +79,12 @@ class AdminHandlerExtensions:
             await self._handle_editing_item_weight(message, text)
         elif state == AdminState.EDITING_ITEM_CALORIES:
             await self._handle_editing_item_calories(message, text)
+        elif state == AdminState.COURIER_ROLE_BY_USERNAME:
+            await self._handle_courier_role_by_username(message, text)
+        elif state == AdminState.EDITING_NOTIFICATION_TEMPLATE:
+            await self._handle_editing_notification_template(message, text)
+        elif state == AdminState.COMPOSING_NOTIFICATION_ANNOUNCEMENT:
+            await self._handle_composing_notification_announcement(message, text)
         else:
             await message.answer("❌ Неизвестное состояние")
             admin_state_service.reset_admin_context(user_id)
@@ -92,8 +100,32 @@ class AdminHandlerExtensions:
         if state in [AdminState.ADDING_CATEGORY_IMAGE, AdminState.EDITING_CATEGORY_IMAGE,
                      AdminState.ADDING_ITEM_IMAGE, AdminState.EDITING_ITEM_IMAGE]:
             await self._handle_photo_upload(message)
+        elif state == AdminState.ATTACHING_NOTIFICATION_MEDIA:
+            await self._handle_notification_media_upload(message, media_type="photo", file_id=message.photo[-1].file_id)
         else:
             await message.answer("❌ Фото не ожидается в текущем состоянии")
+
+    async def handle_admin_video(self, message: Message, data: Dict[str, Any] = None) -> None:
+        """Handle admin video messages during editing."""
+        if data is None:
+            data = {}
+        user_id = data.get("user_id", message.from_user.id)
+        state = admin_state_service.get_admin_state(user_id)
+        if state == AdminState.ATTACHING_NOTIFICATION_MEDIA and message.video:
+            await self._handle_notification_media_upload(message, media_type="video", file_id=message.video.file_id)
+            return
+        await message.answer("❌ Видео не ожидается в текущем состоянии")
+
+    async def handle_admin_document(self, message: Message, data: Dict[str, Any] = None) -> None:
+        """Handle admin document messages during editing."""
+        if data is None:
+            data = {}
+        user_id = data.get("user_id", message.from_user.id)
+        state = admin_state_service.get_admin_state(user_id)
+        if state == AdminState.ATTACHING_NOTIFICATION_MEDIA and message.document:
+            await self._handle_notification_media_upload(message, media_type="document", file_id=message.document.file_id)
+            return
+        await message.answer("❌ Документ не ожидается в текущем состоянии")
 
     # Category creation handlers
     async def _handle_adding_category_name(self, message: Message, text: str) -> None:
@@ -533,6 +565,137 @@ class AdminHandlerExtensions:
             await self._handle_category_photo_upload(message, file_id)
         elif state in [AdminState.ADDING_ITEM_IMAGE, AdminState.EDITING_ITEM_IMAGE]:
             await self._handle_item_photo_upload(message, file_id)
+
+    async def _handle_courier_role_by_username(self, message: Message, text: str) -> None:
+        """Toggle courier role by Telegram username."""
+        user_id = message.from_user.id
+        raw_value = (text or "").strip()
+
+        if raw_value == "-":
+            admin_state_service.reset_admin_context(user_id)
+            await message.answer(
+                "❌ Действие отменено",
+                reply_markup=AdminKeyboard.get_users_management_keyboard()
+            )
+            return
+
+        normalized = raw_value.lstrip("@").strip()
+        if not normalized:
+            await message.answer(
+                "❌ Укажите username в формате @username или username",
+                reply_markup=AdminKeyboard.get_cancel_keyboard()
+            )
+            return
+
+        try:
+            user_service = await get_user_service()
+            candidates = await user_service.search_users(normalized)
+            username_lower = normalized.lower()
+            matched = next(
+                (candidate for candidate in candidates if (candidate.username or "").lower() == username_lower),
+                None
+            )
+
+            if not matched:
+                await message.answer(
+                    f"❌ Пользователь с username @{normalized} не найден",
+                    reply_markup=AdminKeyboard.get_cancel_keyboard()
+                )
+                return
+
+            if matched.role == UserRole.ADMIN:
+                await message.answer(
+                    "❌ Нельзя менять роль администратора через этот сценарий",
+                    reply_markup=AdminKeyboard.get_users_management_keyboard()
+                )
+                admin_state_service.reset_admin_context(user_id)
+                return
+
+            if matched.role == UserRole.COURIER:
+                matched.role = UserRole.CUSTOMER
+                result_text = "✅ Роль курьера снята"
+            else:
+                matched.role = UserRole.COURIER
+                result_text = "✅ Пользователь назначен курьером"
+
+            await user_service.update_user(matched)
+
+            await message.answer(
+                f"{result_text}\n\n👤 @{matched.username or 'без username'}\n🆔 TG ID: {matched.telegram_id}",
+                reply_markup=AdminKeyboard.get_users_management_keyboard()
+            )
+            admin_state_service.reset_admin_context(user_id)
+        except Exception as e:
+            if self.logger:
+                self.logger.error(f"Courier role toggle by username failed: {e}")
+            await message.answer(
+                f"❌ Ошибка при изменении роли: {str(e)}",
+                reply_markup=AdminKeyboard.get_users_management_keyboard()
+            )
+            admin_state_service.reset_admin_context(user_id)
+
+    async def _handle_editing_notification_template(self, message: Message, text: str) -> None:
+        """Handle notification template text editing."""
+        user_id = message.from_user.id
+        template_type = admin_state_service.get_temp_data(user_id, "notification_template_type")
+        if not template_type:
+            await message.answer("❌ Не найден шаблон для редактирования")
+            admin_state_service.reset_admin_context(user_id)
+            return
+
+        new_text = (text or "").strip()
+        if not new_text:
+            await message.answer(
+                "❌ Текст шаблона не может быть пустым. Отправьте новый текст:",
+                reply_markup=AdminKeyboard.get_cancel_keyboard()
+            )
+            return
+
+        try:
+            set_notification_template(template_type, new_text)
+            await message.answer(
+                f"✅ Шаблон <b>{template_type}</b> обновлен",
+                reply_markup=AdminKeyboard.get_notification_template_editor_keyboard(template_type)
+            )
+        except ValueError:
+            await message.answer("❌ Неизвестный шаблон уведомления")
+        finally:
+            admin_state_service.reset_admin_context(user_id)
+
+    async def _handle_notification_media_upload(self, message: Message, media_type: str, file_id: str) -> None:
+        """Store selected media for notification sending."""
+        user_id = message.from_user.id
+        audience = admin_state_service.get_temp_data(user_id, "notification_send_audience")
+        if not audience:
+            await message.answer("❌ Сначала выберите аудиторию для рассылки")
+            admin_state_service.reset_admin_context(user_id)
+            return
+
+        admin_state_service.set_temp_data(user_id, "notification_send_media_type", media_type)
+        admin_state_service.set_temp_data(user_id, "notification_send_media_file_id", file_id)
+        admin_state_service.set_admin_state(user_id, AdminState.IDLE)
+        await message.answer(
+            "✅ Медиа прикреплено к уведомлению",
+            reply_markup=AdminKeyboard.get_notification_send_preview_keyboard(has_media=True)
+        )
+
+    async def _handle_composing_notification_announcement(self, message: Message, text: str) -> None:
+        """Handle announcement text input for broadcast notifications."""
+        user_id = message.from_user.id
+        announcement_text = (text or "").strip()
+        if not announcement_text:
+            await message.answer(
+                "❌ Текст объявления не может быть пустым. Отправьте текст:",
+                reply_markup=AdminKeyboard.get_cancel_keyboard()
+            )
+            return
+
+        admin_state_service.set_temp_data(user_id, "notification_send_text", announcement_text)
+        admin_state_service.set_admin_state(user_id, AdminState.IDLE)
+        await message.answer(
+            "✅ Текст объявления сохранен. Можно прикрепить медиа или отправить.",
+            reply_markup=AdminKeyboard.get_notification_send_preview_keyboard(has_media=False)
+        )
 
     async def _handle_category_photo_upload(self, message: Message, file_id: str) -> None:
         """Handle category photo upload."""

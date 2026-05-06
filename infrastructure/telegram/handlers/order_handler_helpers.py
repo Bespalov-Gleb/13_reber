@@ -14,6 +14,7 @@ from app.dependencies import (
     get_order_state_service, get_cart_service, get_user_service,
     get_notification_service, get_maps_service
 )
+from app.config import get_settings
 
 
 class OrderHandlerHelpers:
@@ -21,8 +22,22 @@ class OrderHandlerHelpers:
     
     def __init__(self, logger):
         self.logger = logger
+
+    async def _render_event_text(self, event: Message | CallbackQuery, text: str, reply_markup=None) -> None:
+        """Render text for both Message and CallbackQuery sources."""
+        target_message = event.message if isinstance(event, CallbackQuery) else event
+        if target_message is None:
+            return
+        try:
+            if isinstance(event, CallbackQuery):
+                await target_message.edit_text(text=text, reply_markup=reply_markup)
+            else:
+                await target_message.answer(text=text, reply_markup=reply_markup)
+        except Exception:
+            # Fallback: always send a new message
+            await target_message.answer(text=text, reply_markup=reply_markup)
     
-    async def _show_order_type_selection(self, callback: CallbackQuery, user_id: int, data: Dict[str, Any]) -> None:
+    async def _show_order_type_selection(self, event: Message | CallbackQuery, user_id: int, data: Dict[str, Any]) -> None:
         """Show order type selection."""
         order_state_service = await get_order_state_service()
         order_state_service.set_state(user_id, OrderState.SELECTING_ORDER_TYPE)
@@ -30,25 +45,25 @@ class OrderHandlerHelpers:
         text = "🚚 <b>Оформление заказа</b>\n\nВыберите способ получения:"
         keyboard = OrderKeyboard.get_order_type_keyboard()
         
-        await callback.message.edit_text(
-            text=text,
-            reply_markup=keyboard
-        )
+        await self._render_event_text(event, text, keyboard)
     
-    async def _show_payment_method_selection(self, callback: CallbackQuery, user_id: int, data: Dict[str, Any]) -> None:
+    async def _show_payment_method_selection(self, event: Message | CallbackQuery, user_id: int, data: Dict[str, Any]) -> None:
         """Show payment method selection."""
         order_state_service = await get_order_state_service()
         order_state_service.set_state(user_id, OrderState.SELECTING_ORDER_TYPE)  # Will be updated after payment selection
         
-        text = "💳 <b>Способ оплаты</b>\n\nВыберите способ оплаты:"
+        text = (
+            "💳 <b>Оплата при получении</b>\n\n"
+            "Оплата только при получении заказа:\n"
+            "• наличные\n"
+            "• карта\n\n"
+            "При доставке расчёт с курьером."
+        )
         keyboard = OrderKeyboard.get_payment_method_keyboard()
         
-        await callback.message.edit_text(
-            text=text,
-            reply_markup=keyboard
-        )
+        await self._render_event_text(event, text, keyboard)
     
-    async def _show_address_input(self, callback: CallbackQuery, user_id: int, data: Dict[str, Any]) -> None:
+    async def _show_address_input(self, event: Message | CallbackQuery, user_id: int, data: Dict[str, Any]) -> None:
         """Show address input."""
         order_state_service = await get_order_state_service()
         order_state_service.set_state(user_id, OrderState.ENTERING_DELIVERY_ADDRESS)
@@ -56,12 +71,9 @@ class OrderHandlerHelpers:
         text = "📍 <b>Адрес доставки</b>\n\nВведите адрес доставки:"
         keyboard = OrderKeyboard.get_back_keyboard()
         
-        await callback.message.edit_text(
-            text=text,
-            reply_markup=keyboard
-        )
+        await self._render_event_text(event, text, keyboard)
     
-    async def _show_address_suggestions(self, callback: CallbackQuery, suggestions: List[Dict[str, str]], user_id: int, data: Dict[str, Any]) -> None:
+    async def _show_address_suggestions(self, event: Message | CallbackQuery, suggestions: List[Dict[str, str]], user_id: int, data: Dict[str, Any]) -> None:
         """Show address suggestions."""
         order_state_service = await get_order_state_service()
         order_state_service.set_state(user_id, OrderState.SELECTING_ADDRESS_SUGGESTION)
@@ -73,12 +85,9 @@ class OrderHandlerHelpers:
         text = "📍 <b>Выберите адрес</b>\n\nНайдены следующие варианты:"
         keyboard = OrderKeyboard.get_address_suggestions_keyboard(suggestions)
         
-        await callback.message.edit_text(
-            text=text,
-            reply_markup=keyboard
-        )
+        await self._render_event_text(event, text, keyboard)
     
-    async def _show_delivery_phone_input(self, callback: CallbackQuery, user_id: int, data: Dict[str, Any]) -> None:
+    async def _show_delivery_phone_input(self, event: Message | CallbackQuery, user_id: int, data: Dict[str, Any]) -> None:
         """Show delivery phone input."""
         order_state_service = await get_order_state_service()
         order_state_service.set_state(user_id, OrderState.ENTERING_DELIVERY_PHONE)
@@ -86,12 +95,9 @@ class OrderHandlerHelpers:
         text = "📱 <b>Телефон для доставки</b>\n\nУкажите номер телефона для связи с курьером:"
         keyboard = OrderKeyboard.get_delivery_phone_keyboard()
         
-        await callback.message.edit_text(
-            text=text,
-            reply_markup=keyboard
-        )
+        await self._render_event_text(event, text, keyboard)
     
-    async def _show_order_time_selection(self, callback: CallbackQuery, user_id: int, data: Dict[str, Any]) -> None:
+    async def _show_order_time_selection(self, event: Message | CallbackQuery, user_id: int, data: Dict[str, Any]) -> None:
         """Show order time selection."""
         order_state_service = await get_order_state_service()
         order_state_service.set_state(user_id, OrderState.SELECTING_ORDER_TIME)
@@ -99,12 +105,9 @@ class OrderHandlerHelpers:
         text = "🕐 <b>Время заказа</b>\n\nКогда вы хотите получить заказ?"
         keyboard = OrderKeyboard.get_order_time_keyboard()
         
-        await callback.message.edit_text(
-            text=text,
-            reply_markup=keyboard
-        )
+        await self._render_event_text(event, text, keyboard)
     
-    async def _show_scheduled_time_input(self, callback: CallbackQuery, user_id: int, data: Dict[str, Any]) -> None:
+    async def _show_scheduled_time_input(self, event: Message | CallbackQuery, user_id: int, data: Dict[str, Any]) -> None:
         """Show scheduled time input."""
         order_state_service = await get_order_state_service()
         order_state_service.set_state(user_id, OrderState.ENTERING_SCHEDULED_TIME)
@@ -112,12 +115,9 @@ class OrderHandlerHelpers:
         text = "🕐 <b>Время получения</b>\n\nВведите желаемое время в формате ЧЧ:ММ (например, 14:30):"
         keyboard = OrderKeyboard.get_back_keyboard()
         
-        await callback.message.edit_text(
-            text=text,
-            reply_markup=keyboard
-        )
+        await self._render_event_text(event, text, keyboard)
     
-    async def _show_comment_selection(self, callback: CallbackQuery, user_id: int, data: Dict[str, Any]) -> None:
+    async def _show_comment_selection(self, event: Message | CallbackQuery, user_id: int, data: Dict[str, Any]) -> None:
         """Show comment selection."""
         order_state_service = await get_order_state_service()
         order_state_service.set_state(user_id, OrderState.ENTERING_ORDER_COMMENT)
@@ -125,12 +125,9 @@ class OrderHandlerHelpers:
         text = "💬 <b>Комментарий к заказу</b>\n\nХотите добавить комментарий к заказу?"
         keyboard = OrderKeyboard.get_comment_keyboard()
         
-        await callback.message.edit_text(
-            text=text,
-            reply_markup=keyboard
-        )
+        await self._render_event_text(event, text, keyboard)
     
-    async def _show_promo_code_selection(self, callback: CallbackQuery, user_id: int, data: Dict[str, Any]) -> None:
+    async def _show_promo_code_selection(self, event: Message | CallbackQuery, user_id: int, data: Dict[str, Any]) -> None:
         """Show promo code selection."""
         order_state_service = await get_order_state_service()
         order_state_service.set_state(user_id, OrderState.ENTERING_PROMO_CODE)
@@ -138,10 +135,7 @@ class OrderHandlerHelpers:
         text = "🎁 <b>Промокод</b>\n\nУ вас есть промокод на скидку?"
         keyboard = OrderKeyboard.get_promo_code_keyboard()
         
-        await callback.message.edit_text(
-            text=text,
-            reply_markup=keyboard
-        )
+        await self._render_event_text(event, text, keyboard)
     
     async def _handle_promo_code_input(self, message: Message, user_id: int, data: Dict[str, Any]) -> None:
         """Handle promo code input."""
@@ -149,7 +143,7 @@ class OrderHandlerHelpers:
         
         # Get cart service to calculate order amount
         cart_service = await get_cart_service(data)
-        cart = await cart_service.get_cart(str(user_id))
+        cart = await cart_service.get_or_create_cart(user_id)
         
         if not cart or not cart.items:
             await message.answer("❌ Корзина пуста")
@@ -214,7 +208,7 @@ class OrderHandlerHelpers:
         
         await callback.answer()
     
-    async def _show_order_confirmation(self, callback: CallbackQuery, user_id: int, data: Dict[str, Any]) -> None:
+    async def _show_order_confirmation(self, event: Message | CallbackQuery, user_id: int, data: Dict[str, Any]) -> None:
         """Show order confirmation."""
         order_state_service = await get_order_state_service()
         order_state_service.set_state(user_id, OrderState.CONFIRMING_ORDER)
@@ -224,30 +218,27 @@ class OrderHandlerHelpers:
         
         # Get cart service to show order summary
         cart_service = await get_cart_service(data)
-        cart = await cart_service.get_cart(str(user_id))
+        cart = await cart_service.get_or_create_cart(user_id)
         
         if not cart or not cart.items:
-            await callback.answer("❌ Корзина пуста")
+            if isinstance(event, CallbackQuery):
+                await event.answer("❌ Корзина пуста")
+            else:
+                await event.answer("❌ Корзина пуста")
             return
         
         # Format order summary
         text = self._format_order_summary(context, cart)
         keyboard = OrderKeyboard.get_confirmation_keyboard()
         
-        await callback.message.edit_text(
-            text=text,
-            reply_markup=keyboard
-        )
+        await self._render_event_text(event, text, keyboard)
     
-    async def _show_delivery_zone_error(self, callback: CallbackQuery, user_id: int, data: Dict[str, Any]) -> None:
+    async def _show_delivery_zone_error(self, event: Message | CallbackQuery, user_id: int, data: Dict[str, Any]) -> None:
         """Show delivery zone error."""
         text = "❌ <b>Адрес вне зоны доставки</b>\n\nК сожалению, доставка по указанному адресу недоступна. Выберите один из вариантов:"
         keyboard = OrderKeyboard.get_delivery_zone_error_keyboard()
         
-        await callback.message.edit_text(
-            text=text,
-            reply_markup=keyboard
-        )
+        await self._render_event_text(event, text, keyboard)
     
     async def _handle_address_input(self, message: Message, text: str, user_id: int, data: Dict[str, Any]) -> None:
         """Handle address input."""
@@ -288,10 +279,14 @@ class OrderHandlerHelpers:
         # Validate delivery zone
         try:
             maps_service = await get_maps_service()
-            # TODO: Get cafe coordinates from settings
-            cafe_coordinates = (55.7558, 37.6176)  # Moscow coordinates as example
+            settings = get_settings()
+            cafe_coordinates = (settings.cafe_latitude, settings.cafe_longitude)
             
-            is_in_zone = await maps_service.validate_delivery_zone(selected_address, cafe_coordinates)
+            is_in_zone = await maps_service.validate_delivery_zone(
+                selected_address,
+                cafe_coordinates,
+                max_distance=float(settings.cafe_delivery_zone_radius)
+            )
             
             if is_in_zone:
                 # Address is in delivery zone, proceed to phone input
@@ -304,7 +299,7 @@ class OrderHandlerHelpers:
             # Proceed anyway if validation fails
             await self._show_delivery_phone_input(callback, user_id, data)
     
-    async def _handle_manual_address_input(self, callback: CallbackQuery, user_id: int, data: Dict[str, Any]) -> None:
+    async def _handle_manual_address_input(self, event: Message | CallbackQuery, user_id: int, data: Dict[str, Any]) -> None:
         """Handle manual address input."""
         order_state_service = await get_order_state_service()
         order_state_service.set_state(user_id, OrderState.ENTERING_DELIVERY_ADDRESS)
@@ -312,10 +307,7 @@ class OrderHandlerHelpers:
         text = "📍 <b>Введите адрес вручную</b>\n\nВведите полный адрес доставки:"
         keyboard = OrderKeyboard.get_back_keyboard()
         
-        await callback.message.edit_text(
-            text=text,
-            reply_markup=keyboard
-        )
+        await self._render_event_text(event, text, keyboard)
     
     async def _handle_address_retry(self, callback: CallbackQuery, user_id: int, data: Dict[str, Any]) -> None:
         """Handle address retry."""
@@ -346,7 +338,7 @@ class OrderHandlerHelpers:
         # Proceed to time selection
         await self._show_order_time_selection(callback, user_id, data)
     
-    async def _handle_manual_phone_input(self, callback: CallbackQuery, user_id: int, data: Dict[str, Any]) -> None:
+    async def _handle_manual_phone_input(self, event: Message | CallbackQuery, user_id: int, data: Dict[str, Any]) -> None:
         """Handle manual phone input."""
         order_state_service = await get_order_state_service()
         order_state_service.set_state(user_id, OrderState.ENTERING_DELIVERY_PHONE)
@@ -354,10 +346,7 @@ class OrderHandlerHelpers:
         text = "📱 <b>Введите номер телефона</b>\n\nВведите номер телефона для связи с курьером:"
         keyboard = OrderKeyboard.get_back_keyboard()
         
-        await callback.message.edit_text(
-            text=text,
-            reply_markup=keyboard
-        )
+        await self._render_event_text(event, text, keyboard)
     
     async def _handle_time_input(self, message: Message, text: str, user_id: int, data: Dict[str, Any]) -> None:
         """Handle time input."""
@@ -411,7 +400,7 @@ class OrderHandlerHelpers:
         # Proceed to confirmation
         await self._show_order_confirmation(message, user_id, data)
     
-    async def _handle_comment_input_request(self, callback: CallbackQuery, user_id: int, data: Dict[str, Any]) -> None:
+    async def _handle_comment_input_request(self, event: Message | CallbackQuery, user_id: int, data: Dict[str, Any]) -> None:
         """Handle comment input request."""
         order_state_service = await get_order_state_service()
         order_state_service.set_state(user_id, OrderState.ENTERING_ORDER_COMMENT)
@@ -419,10 +408,7 @@ class OrderHandlerHelpers:
         text = "💬 <b>Комментарий к заказу</b>\n\nВведите комментарий к заказу:"
         keyboard = OrderKeyboard.get_back_keyboard()
         
-        await callback.message.edit_text(
-            text=text,
-            reply_markup=keyboard
-        )
+        await self._render_event_text(event, text, keyboard)
     
     async def _handle_comment_selection(self, callback: CallbackQuery, comment: str, user_id: int, data: Dict[str, Any]) -> None:
         """Handle comment selection."""
@@ -453,10 +439,10 @@ class OrderHandlerHelpers:
             text += f"🕐 Время: {context.scheduled_time}\n"
         
         # Payment method
-        if context.payment_method == "online":
-            text += "💳 Оплата: Онлайн\n"
+        if context.payment_method == "card":
+            text += "💳 Оплата: карта при получении\n"
         else:
-            text += "💵 Оплата: Наличными\n"
+            text += "💵 Оплата: наличные при получении\n"
         
         # Comment
         if context.comment:
@@ -466,7 +452,7 @@ class OrderHandlerHelpers:
         
         # Cart items
         total = 0
-        for item in cart.items:
+        for item in cart.get_items_list():
             item_total = item.price * item.quantity
             total += item_total
             text += f"• {item.name} x{item.quantity} - {item_total // 100}₽\n"

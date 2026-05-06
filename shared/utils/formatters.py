@@ -95,8 +95,8 @@ def format_payment_status(status: PaymentStatus) -> str:
 def format_payment_method(method: PaymentMethod) -> str:
     """Format payment method to human-readable format."""
     method_map = {
-        PaymentMethod.ONLINE: "💳 Онлайн оплата",
-        PaymentMethod.CASH: "💵 Наличные",
+        PaymentMethod.ONLINE: "💳 Онлайн (устарело)",
+        PaymentMethod.CASH: "💵 Наличные при получении",
         PaymentMethod.CARD: "💳 Карта при получении",
     }
     return method_map.get(method, method.value)

@@ -35,6 +35,7 @@ class AdminHandlerCallbacks:
     async def handle_edit_category_callback(self, callback: CallbackQuery, **kwargs) -> None:
         """Handle edit category callback."""
         data = kwargs.get("data", {})
+        user_id = data.get("user_id", callback.from_user.id)
         
         # Robust parsing: edit_category:<action>:id:<category_id>
         parts = callback.data.split(":")
@@ -369,11 +370,13 @@ class AdminHandlerCallbacks:
                 
             elif action == "view":
                 # View specific booking
-                if len(parts) < 3:
+                booking_id = CallbackParser.get_value(callback_data, "booking_id")
+                if not booking_id and len(parts) >= 3:
+                    # Backward compatibility for plain format: admin_bookings:view:<id>
+                    booking_id = parts[2]
+                if not booking_id:
                     await callback.answer("❌ Неверные данные")
                     return
-                
-                booking_id = parts[2]
                 booking = await booking_service.get_booking(booking_id)
                 
                 if not booking:
@@ -412,39 +415,89 @@ class AdminHandlerCallbacks:
                 
             elif action == "confirm":
                 # Confirm booking
-                if len(parts) < 3:
+                booking_id = CallbackParser.get_value(callback_data, "booking_id")
+                if not booking_id and len(parts) >= 3:
+                    booking_id = parts[2]
+                if not booking_id:
                     await callback.answer("❌ Неверные данные")
                     return
-                
-                booking_id = parts[2]
                 booking = await booking_service.confirm_booking(booking_id)
-                
-                await callback.answer("✅ Бронирование подтверждено")
-                
-                # Refresh the booking view
-                await self.handle_bookings_callback(callback, **kwargs)
+
+                date_str = booking.booking_date.strftime("%d.%m.%Y")
+                time_str = booking.booking_time.strftime("%H:%M")
+                status_emoji = {
+                    "pending": "⏳",
+                    "confirmed": "✅",
+                    "cancelled": "❌"
+                }.get(booking.status, "❓")
+
+                text = f"🪑 <b>Детали бронирования</b>\n\n"
+                text += f"🆔 ID: {booking.booking_id[:8]}\n"
+                text += f"👥 Гостей: {booking.guests_count}\n"
+                text += f"📅 Дата: {date_str}\n"
+                text += f"🕐 Время: {time_str}\n"
+                text += f"📊 Статус: {status_emoji} {booking.status}\n"
+                text += f"👤 Имя: {booking.contact_name}\n"
+                text += f"📞 Телефон: {booking.contact_phone}\n"
+                if booking.comment:
+                    text += f"💬 Комментарий: {booking.comment}\n"
+                text += f"🕐 Создано: {booking.created_at.strftime('%d.%m.%Y %H:%M')}"
+
+                from infrastructure.telegram.keyboards.booking_keyboard import BookingKeyboard
+                keyboard = BookingKeyboard.get_booking_management_keyboard(booking)
+                await self.admin_handler.safe_edit_message(
+                    callback.message,
+                    text=text,
+                    reply_markup=keyboard
+                )
                 
             elif action == "cancel":
                 # Cancel booking
-                if len(parts) < 3:
+                booking_id = CallbackParser.get_value(callback_data, "booking_id")
+                if not booking_id and len(parts) >= 3:
+                    booking_id = parts[2]
+                if not booking_id:
                     await callback.answer("❌ Неверные данные")
                     return
-                
-                booking_id = parts[2]
                 booking = await booking_service.cancel_booking(booking_id)
-                
-                await callback.answer("❌ Бронирование отменено")
-                
-                # Refresh the booking view
-                await self.handle_bookings_callback(callback, **kwargs)
+
+                date_str = booking.booking_date.strftime("%d.%m.%Y")
+                time_str = booking.booking_time.strftime("%H:%M")
+                status_emoji = {
+                    "pending": "⏳",
+                    "confirmed": "✅",
+                    "cancelled": "❌"
+                }.get(booking.status, "❓")
+
+                text = f"🪑 <b>Детали бронирования</b>\n\n"
+                text += f"🆔 ID: {booking.booking_id[:8]}\n"
+                text += f"👥 Гостей: {booking.guests_count}\n"
+                text += f"📅 Дата: {date_str}\n"
+                text += f"🕐 Время: {time_str}\n"
+                text += f"📊 Статус: {status_emoji} {booking.status}\n"
+                text += f"👤 Имя: {booking.contact_name}\n"
+                text += f"📞 Телефон: {booking.contact_phone}\n"
+                if booking.comment:
+                    text += f"💬 Комментарий: {booking.comment}\n"
+                text += f"🕐 Создано: {booking.created_at.strftime('%d.%m.%Y %H:%M')}"
+
+                from infrastructure.telegram.keyboards.booking_keyboard import BookingKeyboard
+                keyboard = BookingKeyboard.get_booking_management_keyboard(booking)
+                await self.admin_handler.safe_edit_message(
+                    callback.message,
+                    text=text,
+                    reply_markup=keyboard
+                )
                 
             elif action == "page":
                 # Handle pagination
-                if len(parts) < 3:
+                page_value = CallbackParser.get_value(callback_data, "page")
+                if page_value is None and len(parts) >= 3:
+                    page_value = parts[2]
+                if page_value is None:
                     await callback.answer("❌ Неверные данные")
                     return
-                
-                page = int(parts[2])
+                page = int(page_value)
                 bookings = await booking_service.get_upcoming_bookings(limit=20, offset=page*5)
                 
                 if not bookings:
@@ -542,7 +595,12 @@ class AdminHandlerCallbacks:
                     
                     text = f"✅ <b>Синхронизация меню завершена!</b>\n\nВремя синхронизации: {sync_time}\n\nМеню обновлено из iiko."
                 else:
-                    text = "❌ <b>Ошибка синхронизации меню</b>\n\nПроверьте подключение к iiko и настройки."
+                    details = ""
+                    if hasattr(sync_service, "get_last_error"):
+                        last_error = sync_service.get_last_error()
+                        if last_error:
+                            details = f"\n\nПричина: {last_error}"
+                    text = "❌ <b>Ошибка синхронизации меню</b>\n\nПроверьте подключение к iiko и настройки." + details
                 
                 keyboard = AdminKeyboard.get_iiko_management_keyboard()
                 
@@ -791,16 +849,50 @@ class AdminHandlerCallbacks:
                     text=text,
                     reply_markup=keyboard
                 )
+
+            elif action == "assign":
+                # Show delivery orders that can be assigned to couriers
+                ready_orders = await order_service.get_orders_by_status("ready")
+                delivery_orders = await order_service.get_orders_by_status("delivery")
+                candidate_orders = ready_orders + delivery_orders
+                unassigned_delivery_orders = [
+                    order for order in candidate_orders
+                    if getattr(order, "order_type", None)
+                    and order.order_type.value == "delivery"
+                    and not getattr(order, "courier_id", None)
+                ]
+
+                if not unassigned_delivery_orders:
+                    text = "🚚 <b>Назначение курьера</b>\n\nНет заказов доставки без назначенного курьера."
+                    keyboard = CourierAdminKeyboard.get_couriers_management_keyboard()
+                else:
+                    text = (
+                        "🚚 <b>Назначение курьера</b>\n\n"
+                        f"Заказов без курьера: {len(unassigned_delivery_orders)}\n"
+                        "Выберите заказ:"
+                    )
+                    keyboard = AdminKeyboard.get_orders_list_keyboard(unassigned_delivery_orders[:10])
+
+                await self.admin_handler.safe_edit_message(
+                    callback.message,
+                    text=text,
+                    reply_markup=keyboard
+                )
                 
             elif action == "assign_to_order":
                 # Handle courier assignment to order
                 if len(parts) >= 4:
                     order_id = parts[2]
-                    courier_id = parts[3]
+                    courier_ref = parts[3]
                     
                     # Get order and courier
                     order = await order_service.get_order(order_id)
-                    courier = await user_service.get_user_by_id(courier_id)
+                    courier = await user_service.get_user_by_id(courier_ref)
+                    if not courier:
+                        try:
+                            courier = await user_service.get_user_by_telegram_id(int(courier_ref))
+                        except (TypeError, ValueError):
+                            courier = None
                     
                     if not order:
                         await callback.answer("❌ Заказ не найден")
@@ -809,9 +901,19 @@ class AdminHandlerCallbacks:
                     if not courier:
                         await callback.answer("❌ Курьер не найден")
                         return
+                    if courier.role != UserRole.COURIER:
+                        await callback.answer("❌ Выбранный пользователь не является курьером")
+                        return
+                    if not courier.is_active:
+                        await callback.answer("❌ Курьер неактивен")
+                        return
                     
                     # Assign courier to order
-                    await order_service.update_order(order_id, courier_id=courier_id)
+                    await order_service.update_order(order_id, courier_id=courier.user_id)
+                    order = await order_service.get_order(order_id)
+                    if not order:
+                        await callback.answer("❌ Не удалось загрузить заказ после назначения")
+                        return
                     
                     # Send notification to courier
                     await notification_service.send_courier_assignment_notification(order, courier)

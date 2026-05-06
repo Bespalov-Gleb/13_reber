@@ -27,10 +27,11 @@ class GoogleSheetsIntegration:
                 'https://www.googleapis.com/auth/drive'
             ]
             
-            # Load credentials
-            if os.path.exists(self.credentials_file):
+            # Load credentials (support local and container-relative paths)
+            creds_path = self._resolve_credentials_path(self.credentials_file)
+            if creds_path and os.path.exists(creds_path):
                 creds = Credentials.from_service_account_file(
-                    self.credentials_file, 
+                    creds_path,
                     scopes=scope
                 )
             else:
@@ -48,6 +49,30 @@ class GoogleSheetsIntegration:
             self._client = gspread.authorize(creds)
         
         return self._client
+
+    @staticmethod
+    def _resolve_credentials_path(raw_path: str) -> Optional[str]:
+        """Resolve credentials path across local/dev and docker layouts."""
+        if not raw_path:
+            return None
+
+        candidates = [raw_path]
+        normalized = raw_path.replace("\\", "/")
+
+        # Common case: env contains "cafe_bot/secrets/..." while cwd is already cafe_bot.
+        prefix = "cafe_bot/"
+        if normalized.startswith(prefix):
+            stripped = normalized[len(prefix):]
+            candidates.append(stripped)
+            candidates.append(os.path.join("/app", stripped))
+
+        # Also try explicit /app mount path in docker.
+        candidates.append(os.path.join("/app", normalized))
+
+        for path in candidates:
+            if path and os.path.exists(path):
+                return path
+        return raw_path
     
     def _get_spreadsheet(self) -> gspread.Spreadsheet:
         """Get spreadsheet instance."""

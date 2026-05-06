@@ -50,6 +50,7 @@ def create_dispatcher() -> Dispatcher:
     from infrastructure.telegram.handlers.help_handler import HelpHandler
     from infrastructure.telegram.handlers.booking_handler import BookingHandler
     from infrastructure.telegram.handlers.courier_handler import CourierHandler
+    from infrastructure.telegram.handlers.review_handler import ReviewHandler
     
     # Create handler instances
     start_handler = StartHandler()
@@ -61,6 +62,7 @@ def create_dispatcher() -> Dispatcher:
     help_handler = HelpHandler()
     booking_handler = BookingHandler()
     courier_handler = CourierHandler()
+    review_handler = ReviewHandler()
     
     # Include routers
     dp.include_router(start_handler.get_router())
@@ -72,5 +74,6 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(help_handler.get_router())
     dp.include_router(booking_handler.get_router())
     dp.include_router(courier_handler.get_router())
+    dp.include_router(review_handler.get_router())
     
     return dp

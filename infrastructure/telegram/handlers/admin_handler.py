@@ -2,7 +2,7 @@
 
 from typing import Any, Dict
 
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 from aiogram import F
 from infrastructure.telegram.handlers.base_handler import BaseHandler
@@ -10,7 +10,13 @@ from infrastructure.telegram.keyboards.admin_keyboard import AdminKeyboard
 from infrastructure.telegram.utils.callback_parser import CallbackParser
 from domain.services.admin_state_service import admin_state_service
 from shared.types.admin_states import AdminState
-from app.dependencies import get_menu_service, get_order_service
+from app.dependencies import (
+    get_menu_service,
+    get_order_service,
+    get_user_service,
+    get_notification_service,
+    get_review_service,
+)
 
 
 class AdminHandler(BaseHandler):
@@ -50,6 +56,16 @@ class AdminHandler(BaseHandler):
             _F.photo,
             lambda message: admin_state_service.is_admin_editing(message.from_user.id)
         )
+        self.router.message.register(
+            self.extensions.handle_admin_video,
+            _F.video,
+            lambda message: admin_state_service.is_admin_editing(message.from_user.id)
+        )
+        self.router.message.register(
+            self.extensions.handle_admin_document,
+            _F.document,
+            lambda message: admin_state_service.is_admin_editing(message.from_user.id)
+        )
         
         # Text message handler (explicit content filter)
         self.router.message.register(
@@ -66,7 +82,7 @@ class AdminHandler(BaseHandler):
         )
         self.router.callback_query.register(
             self.handle_admin_callback,
-            F.data.startswith("admin")
+            (F.data == "admin") | (F.data.startswith("admin:"))
         )
         
         self.router.callback_query.register(
@@ -159,20 +175,6 @@ class AdminHandler(BaseHandler):
             F.data.startswith("user_")
         )
         
-        # Payments management callbacks
-        self.router.callback_query.register(
-            self.management.handle_payments_callback,
-            F.data.startswith("payments:")
-        )
-        self.router.callback_query.register(
-            self.management.handle_payment_detail_callback,
-            F.data.startswith("payment_detail:")
-        )
-        self.router.callback_query.register(
-            self.management.handle_payment_management_callback,
-            F.data.startswith("payment_")
-        )
-        
         # Notifications management callbacks
         self.router.callback_query.register(
             self.management.handle_notifications_callback,
@@ -181,6 +183,22 @@ class AdminHandler(BaseHandler):
         self.router.callback_query.register(
             self.management.handle_notification_template_callback,
             F.data.startswith("notify_template:")
+        )
+        self.router.callback_query.register(
+            self.management.handle_notification_template_edit_callback,
+            F.data.startswith("notify_template_edit:")
+        )
+        self.router.callback_query.register(
+            self.management.handle_notification_template_reset_callback,
+            F.data.startswith("notify_template_reset:")
+        )
+        self.router.callback_query.register(
+            self.management.handle_notification_send_callback,
+            F.data.startswith("notify_send:")
+        )
+        self.router.callback_query.register(
+            self.handle_admin_reviews_callback,
+            F.data.startswith("admin:reviews")
         )
         
         self.router.callback_query.register(
@@ -276,15 +294,19 @@ class AdminHandler(BaseHandler):
         elif action == "stats":
             # Show statistics
             await self._show_statistics(callback)
+        elif action == "reviews" or action.startswith("reviews:"):
+            # Delegate all review actions to dedicated reviews handler
+            await self.handle_admin_reviews_callback(callback, data=data)
+            return
         elif action == "users":
             # Show users management
             await self._show_users_management(callback)
-        elif action == "payments":
-            # Show payments management
-            await self._show_payments_management(callback)
         elif action == "notifications":
             # Show notifications management
             await self._show_notifications_management(callback)
+        elif action == "reviews":
+            # Show reviews management
+            await self._show_reviews_management(callback)
         elif action == "back":
             # Go back to admin main menu
             await self.safe_edit_message(
@@ -447,6 +469,134 @@ class AdminHandler(BaseHandler):
             text="📢 <b>Управление уведомлениями</b>\n\nВыберите действие:",
             reply_markup=AdminKeyboard.get_notifications_management_keyboard()
         )
+
+    async def _show_reviews_management(self, callback: CallbackQuery) -> None:
+        """Show reviews management menu."""
+        from infrastructure.telegram.keyboards.review_keyboard import ReviewKeyboard
+        await self.safe_edit_message(
+            callback.message,
+            text="⭐ <b>Управление отзывами</b>\n\nВыберите действие:",
+            reply_markup=ReviewKeyboard.get_admin_review_management_keyboard()
+        )
+
+    @staticmethod
+    def _build_admin_reviews_list_keyboard(reviews: list) -> InlineKeyboardMarkup:
+        """Build compact admin reviews list keyboard."""
+        buttons: list[list[InlineKeyboardButton]] = []
+        for review in reviews[:15]:
+            target = review.order_id[:8] if review.order_id else (review.menu_item_id[:8] if review.menu_item_id else "N/A")
+            label = f"{review.get_rating_stars()} #{target}"
+            buttons.append([InlineKeyboardButton(text=label, callback_data=f"admin:reviews:view:{review.review_id}")])
+        buttons.append([InlineKeyboardButton(text="🔙 К разделу отзывов", callback_data="admin:reviews:menu")])
+        return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+    async def handle_admin_reviews_callback(self, callback: CallbackQuery, **kwargs) -> None:
+        """Handle admin reviews callbacks."""
+        data = kwargs.get("data", {})
+        user_id = data.get("user_id", callback.from_user.id)
+        is_admin = data.get("is_admin", False)
+        if not is_admin:
+            try:
+                from app.config import get_settings
+                if user_id in get_settings().admin_user_ids:
+                    is_admin = True
+            except Exception:
+                pass
+        if not is_admin:
+            await callback.answer("❌ У вас нет прав администратора")
+            return
+
+        parts = (callback.data or "").split(":")
+        action = parts[2] if len(parts) > 2 else "menu"
+        review_service = await get_review_service(data)
+
+        try:
+            if action in ("menu", ""):
+                await self._show_reviews_management(callback)
+            elif action == "all":
+                reviews = await review_service.get_recent_reviews(limit=100)
+                text = f"⭐ <b>Все отзывы</b>\n\nНайдено: {len(reviews)}"
+                await self.safe_edit_message(
+                    callback.message,
+                    text=text,
+                    reply_markup=self._build_admin_reviews_list_keyboard(reviews)
+                )
+            elif action == "recent":
+                reviews = await review_service.get_recent_reviews(limit=20)
+                text = f"🕒 <b>Недавние отзывы</b>\n\nНайдено: {len(reviews)}"
+                await self.safe_edit_message(
+                    callback.message,
+                    text=text,
+                    reply_markup=self._build_admin_reviews_list_keyboard(reviews)
+                )
+            elif action == "unanswered":
+                recent = await review_service.get_recent_reviews(limit=100)
+                reviews = [r for r in recent if not r.is_answered]
+                text = f"❓ <b>Отзывы без ответа</b>\n\nНайдено: {len(reviews)}"
+                await self.safe_edit_message(
+                    callback.message,
+                    text=text,
+                    reply_markup=self._build_admin_reviews_list_keyboard(reviews)
+                )
+            elif action == "by_rating":
+                kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="⭐⭐⭐⭐⭐ (5)", callback_data="admin:reviews:rating:5")],
+                    [InlineKeyboardButton(text="⭐⭐⭐⭐ (4)", callback_data="admin:reviews:rating:4")],
+                    [InlineKeyboardButton(text="⭐⭐⭐ (3)", callback_data="admin:reviews:rating:3")],
+                    [InlineKeyboardButton(text="⭐⭐ (2)", callback_data="admin:reviews:rating:2")],
+                    [InlineKeyboardButton(text="⭐ (1)", callback_data="admin:reviews:rating:1")],
+                    [InlineKeyboardButton(text="🔙 К разделу отзывов", callback_data="admin:reviews:menu")],
+                ])
+                await self.safe_edit_message(
+                    callback.message,
+                    text="⭐ <b>Фильтр отзывов по рейтингу</b>\n\nВыберите рейтинг:",
+                    reply_markup=kb
+                )
+            elif action == "rating" and len(parts) >= 4:
+                try:
+                    rating_value = int(parts[3])
+                except ValueError:
+                    await callback.answer("❌ Неверный рейтинг")
+                    return
+                if rating_value < 1 or rating_value > 5:
+                    await callback.answer("❌ Неверный рейтинг")
+                    return
+                reviews = await review_service.get_reviews_by_rating(rating_value, limit=100)
+                text = f"⭐ <b>Отзывы с рейтингом {rating_value}</b>\n\nНайдено: {len(reviews)}"
+                await self.safe_edit_message(
+                    callback.message,
+                    text=text,
+                    reply_markup=self._build_admin_reviews_list_keyboard(reviews)
+                )
+            elif action == "view" and len(parts) >= 4:
+                review_id = parts[3]
+                review = await review_service.get_review_by_id(review_id)
+                if not review:
+                    await callback.answer("❌ Отзыв не найден")
+                    return
+                text = "📝 <b>Детали отзыва</b>\n\n"
+                text += f"🆔 ID: {review.review_id}\n"
+                text += f"⭐ Оценка: {review.get_rating_stars()} ({review.rating}/5)\n"
+                text += f"📦 Заказ: {review.order_id or '—'}\n"
+                text += f"🍽️ Блюдо: {review.menu_item_id or '—'}\n"
+                text += f"👤 Пользователь: {review.user_id}\n"
+                text += f"💬 Комментарий: {review.comment or '—'}\n"
+                text += f"📅 Дата: {review.created_at.strftime('%d.%m.%Y %H:%M')}\n"
+                text += f"📌 Видимость: {'Да' if review.is_visible else 'Нет'}\n"
+                text += f"💼 Ответ админа: {'Да' if review.is_answered else 'Нет'}"
+                kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🔙 К списку отзывов", callback_data="admin:reviews:recent")]
+                ])
+                await self.safe_edit_message(callback.message, text=text, reply_markup=kb)
+            else:
+                await callback.answer("❌ Неизвестное действие")
+                return
+        except Exception as e:
+            self.logger.error(f"Admin reviews callback error: {e}")
+            await callback.answer("❌ Произошла ошибка при загрузке отзывов")
+            return
+
+        await callback.answer()
     
     async def _show_categories_management(self, callback: CallbackQuery, data: Dict[str, Any] | None = None) -> None:
         """Show categories management."""
@@ -998,14 +1148,14 @@ class AdminHandler(BaseHandler):
             sales_stats = await statistics_service.get_sales_statistics(start_date, end_date)
             
             text = "📈 <b>Статистика продаж</b>\n\n"
-            text += f"💰 Общая выручка: {sales_stats.total_sales // 100}₽\n\n"
+            text += f"💰 Общая выручка: {sales_stats['total_sales'] // 100}₽\n\n"
             
             text += "📅 <b>Продажи по дням:</b>\n"
-            for day, amount in sales_stats.sales_by_day[:7]:  # Last 7 days
+            for day, amount in sales_stats['sales_by_day'][:7]:  # Last 7 days
                 text += f"• {day}: {amount // 100}₽\n"
             
             text += "\n🕐 <b>Продажи по часам:</b>\n"
-            for hour, amount in sales_stats.sales_by_hour[:5]:  # Top 5 hours
+            for hour, amount in sales_stats['sales_by_hour'][:5]:  # Top 5 hours
                 text += f"• {hour}:00 - {amount // 100}₽\n"
 
             await self.safe_edit_message(
@@ -1024,12 +1174,12 @@ class AdminHandler(BaseHandler):
             user_stats = await statistics_service.get_user_statistics()
             
             text = "👥 <b>Статистика пользователей</b>\n\n"
-            text += f"👤 Всего пользователей: {user_stats.total_users}\n"
-            text += f"🆕 Новых сегодня: {user_stats.new_users_today}\n"
-            text += f"🆕 Новых на этой неделе: {user_stats.new_users_this_week}\n"
-            text += f"🆕 Новых в этом месяце: {user_stats.new_users_this_month}\n"
-            text += f"🔥 Активных сегодня: {user_stats.active_users_today}\n"
-            text += f"🔥 Активных на этой неделе: {user_stats.active_users_this_week}"
+            text += f"👤 Всего пользователей: {user_stats['total_users']}\n"
+            text += f"🆕 Новых сегодня: {user_stats['new_users_today']}\n"
+            text += f"🆕 Новых на этой неделе: {user_stats['new_users_this_week']}\n"
+            text += f"🆕 Новых в этом месяце: {user_stats['new_users_this_month']}\n"
+            text += f"🔥 Активных сегодня: {user_stats['active_users_today']}\n"
+            text += f"🔥 Активных на этой неделе: {user_stats['active_users_this_week']}"
 
             await self.safe_edit_message(
                 callback.message,
@@ -1047,17 +1197,17 @@ class AdminHandler(BaseHandler):
             menu_stats = await statistics_service.get_menu_statistics()
             
             text = "🍽️ <b>Статистика меню</b>\n\n"
-            text += f"📂 Всего категорий: {menu_stats.total_categories}\n"
-            text += f"📂 Активных категорий: {menu_stats.active_categories}\n"
-            text += f"🍽️ Всего блюд: {menu_stats.total_items}\n"
-            text += f"🍽️ Активных блюд: {menu_stats.active_items}\n\n"
+            text += f"📂 Всего категорий: {menu_stats['total_categories']}\n"
+            text += f"📂 Активных категорий: {menu_stats['active_categories']}\n"
+            text += f"🍽️ Всего блюд: {menu_stats['total_items']}\n"
+            text += f"🍽️ Активных блюд: {menu_stats['active_items']}\n\n"
             
             text += "🏆 <b>Топ категории:</b>\n"
-            for category, count in menu_stats.top_categories[:5]:
+            for category, count in menu_stats['top_categories'][:5]:
                 text += f"• {category}: {count} блюд\n"
             
             text += "\n🏆 <b>Топ блюда:</b>\n"
-            for item, count in menu_stats.top_items[:5]:
+            for item, count in menu_stats['top_items'][:5]:
                 text += f"• {item}: {count} заказов"
 
             await self.safe_edit_message(
@@ -1099,16 +1249,16 @@ class AdminHandler(BaseHandler):
             order_stats = await statistics_service.get_order_statistics(start_date, end_date)
             
             text = f"📊 <b>Статистика {period_text}</b>\n\n"
-            text += f"📦 Всего заказов: {order_stats.total_orders}\n"
-            text += f"💰 Выручка: {order_stats.total_revenue // 100}₽\n"
-            text += f"📈 Средний чек: {order_stats.average_order_value // 100}₽\n\n"
+            text += f"📦 Всего заказов: {order_stats['total_orders']}\n"
+            text += f"💰 Выручка: {order_stats['total_revenue'] // 100}₽\n"
+            text += f"📈 Средний чек: {order_stats['average_order_value'] // 100}₽\n\n"
             
             text += "📊 <b>По статусам:</b>\n"
-            for status, count in order_stats.orders_by_status.items():
+            for status, count in order_stats['orders_by_status'].items():
                 text += f"• {status}: {count}\n"
             
             text += "\n📊 <b>По типам:</b>\n"
-            for order_type, count in order_stats.orders_by_type.items():
+            for order_type, count in order_stats['orders_by_type'].items():
                 text += f"• {order_type}: {count}\n"
 
             await self.safe_edit_message(

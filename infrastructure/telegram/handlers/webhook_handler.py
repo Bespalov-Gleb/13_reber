@@ -99,6 +99,8 @@ class WebhookHandler:
         """Verify CloudPayments webhook signature."""
         if not signature:
             return False
+        if not self.settings.cloudpayments_api_secret:
+            return False
         
         # CloudPayments uses HMAC-SHA256
         expected_signature = hmac.new(

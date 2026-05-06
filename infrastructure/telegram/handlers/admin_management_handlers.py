@@ -15,10 +15,25 @@ from app.dependencies import (
     get_order_service,
     get_payment_service,
 )
+from domain.services.admin_state_service import admin_state_service
+from shared.types.admin_states import AdminState
+from shared.services.notification_templates import (
+    get_notification_template,
+    set_notification_template,
+    reset_notification_template,
+)
+from shared.types.user_types import UserRole
 
 
 class AdminManagementHandlers(BaseHandler):
     """Handlers for admin management operations."""
+
+    _template_variables = {
+        "welcome": "{first_name}, {cafe_name}, {working_hours}",
+        "order_ready": "{order_id_short}, {total_rub}, {order_type}",
+        "order_delivery": "{order_id_short}, {address}",
+        "order_delivered": "{order_id_short}",
+    }
 
     def _register_handlers(self) -> None:
         """Register handlers - not needed as handlers are registered in AdminHandler."""
@@ -58,6 +73,17 @@ class AdminManagementHandlers(BaseHandler):
                 text += f"🆕 Новых сегодня: {user_stats['new_users_today']}\n"
                 text += f"🔥 Активных сегодня: {user_stats['active_users_today']}"
                 keyboard = AdminKeyboard.get_back_to_admin_keyboard()
+            elif action == "courier_toggle_username":
+                admin_state_service.set_admin_state(callback.from_user.id, AdminState.COURIER_ROLE_BY_USERNAME)
+                text = (
+                    "🚚 <b>Управление ролью курьера</b>\n\n"
+                    "Отправьте username пользователя (например: <code>@ivan</code> или <code>ivan</code>).\n"
+                    "Роль будет переключена:\n"
+                    "• CUSTOMER → COURIER\n"
+                    "• COURIER → CUSTOMER\n\n"
+                    "Для отмены отправьте <code>-</code>."
+                )
+                keyboard = AdminKeyboard.get_cancel_keyboard()
             else:
                 await callback.answer("❌ Неизвестное действие")
                 return
@@ -379,7 +405,7 @@ class AdminManagementHandlers(BaseHandler):
         try:
             if action == "send":
                 text = "📢 <b>Отправка уведомлений</b>\n\nВыберите тип уведомления:"
-                keyboard = AdminKeyboard.get_notification_templates_keyboard()
+                keyboard = AdminKeyboard.get_notification_send_keyboard()
             elif action == "templates":
                 text = "📝 <b>Шаблоны уведомлений</b>\n\nВыберите шаблон для редактирования:"
                 keyboard = AdminKeyboard.get_notification_templates_keyboard()
@@ -403,6 +429,143 @@ class AdminManagementHandlers(BaseHandler):
 
         await callback.answer()
 
+    async def handle_notification_send_callback(self, callback: CallbackQuery, **kwargs) -> None:
+        """Handle notification send callbacks."""
+        callback_data = callback.data or ""
+        parts = callback_data.split(":")
+        if len(parts) < 2:
+            await callback.answer("❌ Неверные данные")
+            return
+
+        action = parts[1]
+        if action not in {"audience", "attach_media", "remove_media", "send"}:
+            await callback.answer("❌ Неизвестное действие")
+            return
+
+        user_id = callback.from_user.id
+        if action == "audience":
+            audience = parts[2] if len(parts) > 2 else None
+            if audience not in {"users", "admins", "couriers", "all"}:
+                await callback.answer("❌ Неизвестная аудитория")
+                return
+            admin_state_service.set_temp_data(user_id, "notification_send_audience", audience)
+            admin_state_service.set_temp_data(user_id, "notification_send_text", "")
+            admin_state_service.set_temp_data(user_id, "notification_send_media_type", "")
+            admin_state_service.set_temp_data(user_id, "notification_send_media_file_id", "")
+            admin_state_service.set_admin_state(user_id, AdminState.COMPOSING_NOTIFICATION_ANNOUNCEMENT)
+            audience_title = {
+                "users": "пользователям",
+                "admins": "админам",
+                "couriers": "курьерам",
+                "all": "всем",
+            }[audience]
+            await self.safe_edit_message(
+                callback.message,
+                text=(
+                    f"📣 <b>Рассылка: {audience_title}</b>\n\n"
+                    "Отправьте текст объявления одним сообщением."
+                ),
+                reply_markup=AdminKeyboard.get_cancel_keyboard()
+            )
+            await callback.answer()
+            return
+
+        if action == "attach_media":
+            if not admin_state_service.get_temp_data(user_id, "notification_send_text"):
+                await callback.answer("❌ Сначала введите текст объявления")
+                return
+            admin_state_service.set_admin_state(user_id, AdminState.ATTACHING_NOTIFICATION_MEDIA)
+            await self.safe_edit_message(
+                callback.message,
+                text=(
+                    "📎 <b>Прикрепление медиа</b>\n\n"
+                    "Отправьте одним сообщением фото, видео или документ."
+                ),
+                reply_markup=AdminKeyboard.get_cancel_keyboard()
+            )
+            await callback.answer()
+            return
+
+        if action == "remove_media":
+            admin_state_service.set_temp_data(user_id, "notification_send_media_type", "")
+            admin_state_service.set_temp_data(user_id, "notification_send_media_file_id", "")
+            audience = admin_state_service.get_temp_data(user_id, "notification_send_audience", "users")
+            await self.safe_edit_message(
+                callback.message,
+                text=(
+                    f"📣 <b>Рассылка ({audience})</b>\n\n"
+                    "Медиа удалено. Можно отправить текст или прикрепить новое."
+                ),
+                reply_markup=AdminKeyboard.get_notification_send_preview_keyboard(has_media=False)
+            )
+            await callback.answer("✅ Медиа удалено")
+            return
+
+        announcement_text = admin_state_service.get_temp_data(user_id, "notification_send_text")
+        audience = admin_state_service.get_temp_data(user_id, "notification_send_audience")
+        if not announcement_text or audience not in {"users", "admins", "couriers", "all"}:
+            await callback.answer("❌ Не заполнены данные рассылки")
+            return
+        media_type = admin_state_service.get_temp_data(user_id, "notification_send_media_type")
+        media_file_id = admin_state_service.get_temp_data(user_id, "notification_send_media_file_id")
+
+        try:
+            user_service = await get_user_service(kwargs.get("data", {}))
+            all_users = await user_service.get_all_users()
+            recipients = []
+            for user in all_users:
+                if not user.is_active or not user.telegram_id:
+                    continue
+                if audience == "all":
+                    recipients.append(user)
+                elif audience == "users" and user.role == UserRole.CUSTOMER:
+                    recipients.append(user)
+                elif audience == "admins" and user.role == UserRole.ADMIN:
+                    recipients.append(user)
+                elif audience == "couriers" and user.role == UserRole.COURIER:
+                    recipients.append(user)
+
+            sent_count = 0
+            for recipient in recipients:
+                try:
+                    if media_type and media_file_id:
+                        if media_type == "photo":
+                            await callback.bot.send_photo(
+                                chat_id=recipient.telegram_id,
+                                photo=media_file_id,
+                                caption=announcement_text,
+                                parse_mode="HTML",
+                            )
+                        elif media_type == "video":
+                            await callback.bot.send_video(
+                                chat_id=recipient.telegram_id,
+                                video=media_file_id,
+                                caption=announcement_text,
+                                parse_mode="HTML",
+                            )
+                        elif media_type == "document":
+                            await callback.bot.send_document(
+                                chat_id=recipient.telegram_id,
+                                document=media_file_id,
+                                caption=announcement_text,
+                                parse_mode="HTML",
+                            )
+                    else:
+                        await callback.bot.send_message(
+                            chat_id=recipient.telegram_id,
+                            text=announcement_text,
+                            parse_mode="HTML",
+                        )
+                    sent_count += 1
+                except Exception:
+                    continue
+
+            await callback.answer(f"✅ Отправлено: {sent_count}")
+        except Exception as e:
+            self.logger.error(f"Notification send error: {e}")
+            await callback.answer("❌ Не удалось отправить уведомление")
+            return
+
     async def handle_notification_template_callback(self, callback: CallbackQuery, **kwargs) -> None:
         """Handle notification template callback."""
         data = kwargs.get("data", {})
@@ -412,11 +575,14 @@ class AdminManagementHandlers(BaseHandler):
         template_type = parts[1]
 
         try:
-            # Placeholder for template management
+            current_template = get_notification_template(template_type)
+            available_vars = self._template_variables.get(template_type, "нет")
             text = f"📝 <b>Шаблон: {template_type}</b>\n\n"
-            text += "Здесь будет редактирование шаблона уведомления"
+            text += "Текущий текст:\n"
+            text += f"<blockquote>{current_template}</blockquote>\n\n"
+            text += f"Доступные переменные: <code>{available_vars}</code>"
             
-            keyboard = AdminKeyboard.get_back_to_admin_keyboard()
+            keyboard = AdminKeyboard.get_notification_template_editor_keyboard(template_type)
             
             await self.safe_edit_message(
                 callback.message,
@@ -430,3 +596,57 @@ class AdminManagementHandlers(BaseHandler):
             return
 
         await callback.answer()
+
+    async def handle_notification_template_edit_callback(self, callback: CallbackQuery, **kwargs) -> None:
+        """Enter text editing mode for notification template."""
+        callback_data = callback.data or ""
+        parts = callback_data.split(":")
+        if len(parts) < 2:
+            await callback.answer("❌ Неверные данные")
+            return
+
+        template_type = parts[1]
+        if template_type not in self._template_variables:
+            await callback.answer("❌ Неизвестный шаблон")
+            return
+
+        user_id = callback.from_user.id
+        admin_state_service.set_admin_state(user_id, AdminState.EDITING_NOTIFICATION_TEMPLATE)
+        admin_state_service.set_temp_data(user_id, "notification_template_type", template_type)
+        await self.safe_edit_message(
+            callback.message,
+            text=(
+                f"✏️ <b>Редактирование шаблона: {template_type}</b>\n\n"
+                "Отправьте новый текст шаблона одним сообщением.\n"
+                "Чтобы отменить, нажмите кнопку ниже.\n\n"
+                f"Доступные переменные: <code>{self._template_variables.get(template_type, 'нет')}</code>"
+            ),
+            reply_markup=AdminKeyboard.get_cancel_keyboard()
+        )
+        await callback.answer()
+
+    async def handle_notification_template_reset_callback(self, callback: CallbackQuery, **kwargs) -> None:
+        """Reset notification template to default text."""
+        callback_data = callback.data or ""
+        parts = callback_data.split(":")
+        if len(parts) < 2:
+            await callback.answer("❌ Неверные данные")
+            return
+        template_type = parts[1]
+        try:
+            reset_notification_template(template_type)
+        except ValueError:
+            await callback.answer("❌ Неизвестный шаблон")
+            return
+
+        current_template = get_notification_template(template_type)
+        await self.safe_edit_message(
+            callback.message,
+            text=(
+                f"📝 <b>Шаблон: {template_type}</b>\n\n"
+                "Шаблон сброшен к значению по умолчанию.\n\n"
+                f"<blockquote>{current_template}</blockquote>"
+            ),
+            reply_markup=AdminKeyboard.get_notification_template_editor_keyboard(template_type)
+        )
+        await callback.answer("✅ Шаблон сброшен")

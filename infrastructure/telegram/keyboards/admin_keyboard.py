@@ -26,8 +26,10 @@ class AdminKeyboard(BaseKeyboard):
                 InlineKeyboardButton(text="👥 Пользователи", callback_data="admin:users"),
             ],
             [
-                InlineKeyboardButton(text="💰 Платежи", callback_data="admin:payments"),
                 InlineKeyboardButton(text="📢 Уведомления", callback_data="admin:notifications"),
+            ],
+            [
+                InlineKeyboardButton(text="⭐ Отзывы", callback_data="admin:reviews"),
             ],
             [
                 InlineKeyboardButton(text="🪑 Бронирования", callback_data="admin_bookings:menu"),
@@ -540,6 +542,9 @@ class AdminKeyboard(BaseKeyboard):
                 InlineKeyboardButton(text="🔍 Поиск", callback_data="users:search"),
             ],
             [
+                InlineKeyboardButton(text="🚚 Роль курьера (@username)", callback_data="users:courier_toggle_username"),
+            ],
+            [
                 InlineKeyboardButton(text="🔙 Назад", callback_data="admin:back"),
             ]
         ]
@@ -739,6 +744,62 @@ class AdminKeyboard(BaseKeyboard):
             ],
             [
                 InlineKeyboardButton(text="🔙 Назад", callback_data="admin:notifications")
+            ]
+        ]
+        return BaseKeyboard.create_inline_keyboard(buttons)
+
+    @staticmethod
+    def get_notification_send_keyboard() -> InlineKeyboardMarkup:
+        """Get keyboard for selecting announcement audience."""
+        buttons = [
+            [
+                InlineKeyboardButton(text="👥 Пользователям", callback_data="notify_send:audience:users"),
+                InlineKeyboardButton(text="👨‍💼 Админам", callback_data="notify_send:audience:admins"),
+            ],
+            [
+                InlineKeyboardButton(text="🚚 Курьерам", callback_data="notify_send:audience:couriers"),
+                InlineKeyboardButton(text="🌍 Всем", callback_data="notify_send:audience:all"),
+            ],
+            [
+                InlineKeyboardButton(text="🔙 Назад", callback_data="admin:notifications")
+            ]
+        ]
+        return BaseKeyboard.create_inline_keyboard(buttons)
+
+    @staticmethod
+    def get_notification_send_preview_keyboard(has_media: bool) -> InlineKeyboardMarkup:
+        """Get keyboard for notification send preview and media actions."""
+        media_button_text = "📎 Обновить медиа" if has_media else "📎 Прикрепить медиа"
+        buttons = [
+            [
+                InlineKeyboardButton(text=media_button_text, callback_data="notify_send:attach_media"),
+            ],
+            [
+                InlineKeyboardButton(text="🗑 Убрать медиа", callback_data="notify_send:remove_media"),
+                InlineKeyboardButton(text="📤 Отправить", callback_data="notify_send:send"),
+            ],
+            [
+                InlineKeyboardButton(text="🔙 К аудиториям", callback_data="notify:send"),
+            ],
+        ]
+        return BaseKeyboard.create_inline_keyboard(buttons)
+
+    @staticmethod
+    def get_notification_template_editor_keyboard(template_type: str) -> InlineKeyboardMarkup:
+        """Get keyboard for notification template editor."""
+        buttons = [
+            [
+                InlineKeyboardButton(
+                    text="✏️ Изменить текст",
+                    callback_data=f"notify_template_edit:{template_type}"
+                ),
+                InlineKeyboardButton(
+                    text="♻️ Сбросить",
+                    callback_data=f"notify_template_reset:{template_type}"
+                ),
+            ],
+            [
+                InlineKeyboardButton(text="🔙 К шаблонам", callback_data="admin:notifications")
             ]
         ]
         return BaseKeyboard.create_inline_keyboard(buttons)

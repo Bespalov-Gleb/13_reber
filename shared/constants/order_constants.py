@@ -38,7 +38,7 @@ class PaymentStatus(str, Enum):
 class PaymentMethod(str, Enum):
     """Payment method enumeration."""
     
-    ONLINE = "online"           # Онлайн оплата
+    ONLINE = "online"           # Устарело: только для старых записей в БД
     CASH = "cash"              # Наличные при получении
     CARD = "card"              # Карта при получении
 

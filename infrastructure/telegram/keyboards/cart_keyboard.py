@@ -33,11 +33,7 @@ class CartKeyboard(BaseKeyboard):
         ])
         
         buttons.append([
-            BaseKeyboard.create_callback_button(
-                text="🚚 Оформить заказ",
-                prefix="order",
-                action=""
-            )
+            InlineKeyboardButton(text="🚚 Оформить заказ", callback_data="order")
         ])
         
         # Navigation buttons
@@ -238,10 +234,7 @@ class CartKeyboard(BaseKeyboard):
         """Get payment method selection keyboard."""
         buttons = [
             [
-                InlineKeyboardButton(text="💳 Онлайн оплата", callback_data="order:payment:online"),
-                InlineKeyboardButton(text="💵 Наличные", callback_data="order:payment:cash")
-            ],
-            [
+                InlineKeyboardButton(text="💵 Наличные", callback_data="order:payment:cash"),
                 InlineKeyboardButton(text="💳 Карта при получении", callback_data="order:payment:card")
             ],
             [

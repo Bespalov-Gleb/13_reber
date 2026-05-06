@@ -34,6 +34,12 @@ class AdminState(str, Enum):
     EDITING_ITEM_CALORIES = "editing_item_calories"
     EDITING_ITEM_IMAGE = "editing_item_image"
     EDITING_ITEM_CATEGORY = "editing_item_category"
+
+    # Users management states
+    COURIER_ROLE_BY_USERNAME = "courier_role_by_username"
+    EDITING_NOTIFICATION_TEMPLATE = "editing_notification_template"
+    ATTACHING_NOTIFICATION_MEDIA = "attaching_notification_media"
+    COMPOSING_NOTIFICATION_ANNOUNCEMENT = "composing_notification_announcement"
     
     # Default state
     IDLE = "idle"

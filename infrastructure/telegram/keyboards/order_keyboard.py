@@ -59,14 +59,14 @@ class OrderKeyboard:
         return OrderKeyboard.create_inline_keyboard([
             [
                 OrderKeyboard.create_inline_button(
-                    "💳 Онлайн",
-                    "order:payment:online"
+                    "💵 Наличные",
+                    "order:payment:cash"
                 )
             ],
             [
                 OrderKeyboard.create_inline_button(
-                    "💵 Наличными",
-                    "order:payment:cash"
+                    "💳 Карта при получении",
+                    "order:payment:card"
                 )
             ],
             [

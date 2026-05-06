@@ -7,7 +7,7 @@ from aiogram.filters import CommandStart
 from aiogram.types import Message
 from infrastructure.telegram.handlers.base_handler import BaseHandler
 from infrastructure.telegram.keyboards.main_keyboard import MainKeyboard
-from infrastructure.telegram.utils.message_formatter import MessageFormatter
+from shared.services.notification_templates import render_notification_template
 
 
 class StartHandler(BaseHandler):
@@ -98,8 +98,15 @@ class StartHandler(BaseHandler):
         cafe_name = "Кафе"  # TODO: Get from settings
         working_hours = "09:00-22:00"  # TODO: Get from settings
         
-        # Format welcome message
-        welcome_text = MessageFormatter.format_welcome_message(cafe_name, working_hours)
+        # Format welcome message (can be customized from admin templates)
+        welcome_text = render_notification_template(
+            "welcome",
+            {
+                "first_name": message.from_user.first_name or "друг",
+                "cafe_name": cafe_name,
+                "working_hours": working_hours,
+            },
+        )
         
         # Get appropriate keyboard based on user role
         if is_admin:

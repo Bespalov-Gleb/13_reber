@@ -6,8 +6,10 @@ from .menu_item_model import MenuItemModel
 from .cart_model import CartModel, CartItemModel
 from .order_model import OrderModel
 from .payment_model import PaymentModel
+from .booking_model import BookingModel
 from .cafe_settings_model import CafeSettingsModel
 from .promotion_model import PromotionModel, PromotionUsageModel
+from .review_model import ReviewModel
 
 __all__ = [
     "UserModel",
@@ -17,7 +19,9 @@ __all__ = [
     "CartItemModel",
     "OrderModel",
     "PaymentModel",
+    "BookingModel",
     "CafeSettingsModel",
     "PromotionModel",
     "PromotionUsageModel",
+    "ReviewModel",
 ]

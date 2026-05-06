@@ -11,6 +11,7 @@ from domain.entities.user import User
 from shared.constants.order_constants import OrderStatus, OrderType
 from infrastructure.telegram.utils.message_formatter import MessageFormatter
 from app.config import get_settings
+from shared.services.notification_templates import render_notification_template
 
 
 class NotificationService:
@@ -38,8 +39,33 @@ class NotificationService:
             
             status_text = status_messages.get(order.status, f"📋 Статус заказа изменен: {order.status.value}")
             
-            # Format message
-            message = MessageFormatter.format_order_status_notification(order, order.status)
+            # Format message (uses editable templates for key delivery milestones)
+            if order.status == OrderStatus.READY:
+                message = render_notification_template(
+                    "order_ready",
+                    {
+                        "order_id_short": order.order_id[:8],
+                        "total_rub": str(order.total // 100),
+                        "order_type": "доставка" if order.order_type == OrderType.DELIVERY else "самовывоз",
+                    },
+                )
+            elif order.status == OrderStatus.OUT_FOR_DELIVERY:
+                message = render_notification_template(
+                    "order_delivery",
+                    {
+                        "order_id_short": order.order_id[:8],
+                        "address": order.delivery_info.address if order.delivery_info else "Не указан",
+                    },
+                )
+            elif order.status in (OrderStatus.DELIVERED, OrderStatus.PICKED_UP):
+                message = render_notification_template(
+                    "order_delivered",
+                    {
+                        "order_id_short": order.order_id[:8],
+                    },
+                )
+            else:
+                message = MessageFormatter.format_order_status_notification(order, order.status)
             
             # Send to user
             await self.bot.send_message(

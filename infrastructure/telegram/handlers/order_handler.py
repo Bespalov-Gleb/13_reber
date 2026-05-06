@@ -15,8 +15,10 @@ from domain.services.cart_service import CartService
 from domain.services.user_service import UserService
 from domain.services.notification_service import NotificationService
 from domain.services.order_state_service import OrderStateService
+from domain.services.order_state_service import order_state_service
 from infrastructure.external.maps.yandex_maps import YandexMapsProvider
 from shared.types.order_states import OrderState
+from shared.types.order_types import DeliveryInfo, PickupInfo
 from app.dependencies import (
     get_order_service, get_cart_service, get_user_service, 
     get_notification_service, get_order_state_service, get_maps_service
@@ -42,7 +44,8 @@ class OrderHandler(BaseHandler):
         # Text message handler for order flow
         self.router.message.register(
             self.handle_order_text_message,
-            F.text
+            F.text,
+            lambda message: order_state_service.get_state(message.from_user.id) != OrderState.IDLE
         )
         
         # Callback handlers - order by specificity
@@ -305,9 +308,9 @@ class OrderHandler(BaseHandler):
         callback_data = callback.data
         
         # Parse payment method
-        payment_method = callback_data.split(":")[-1]  # online, cash, card
+        payment_method = callback_data.split(":")[-1]  # cash, card (без онлайн-оплаты)
         
-        if payment_method not in ["online", "cash", "card"]:
+        if payment_method not in ["cash", "card"]:
             await callback.answer("❌ Ошибка: неверный способ оплаты")
             return
         
@@ -395,6 +398,33 @@ class OrderHandler(BaseHandler):
             # Get order context
             order_state_service = await get_order_state_service()
             context = order_state_service.get_context_data(user_id)
+
+            delivery_info = None
+            pickup_info = None
+
+            if context.order_type == "delivery":
+                if not context.delivery_address or not context.delivery_phone:
+                    await self.safe_edit_message(
+                        callback.message,
+                        text=(
+                            "❌ <b>Не заполнены данные доставки</b>\n\n"
+                            "Укажите адрес и телефон для доставки и повторите попытку."
+                        ),
+                        reply_markup=OrderKeyboard.get_back_keyboard()
+                    )
+                    await callback.answer()
+                    return
+                delivery_info = DeliveryInfo(
+                    address=context.delivery_address,
+                    phone=context.delivery_phone,
+                    comment=context.comment or None
+                )
+            else:
+                # For pickup we still store contact phone in pickup_info
+                pickup_info = PickupInfo(
+                    phone=context.delivery_phone or "",
+                    comment=context.comment or None
+                )
             
             # Create order with context data
             order = await order_service.create_order(
@@ -402,7 +432,9 @@ class OrderHandler(BaseHandler):
                 cart=cart,
                 order_type=context.order_type or "pickup",
                 payment_method=context.payment_method or "cash",
-                comment=context.comment
+                comment=context.comment,
+                delivery_info=delivery_info,
+                pickup_info=pickup_info
             )
             
             # Clear cart and reset order context
@@ -528,8 +560,19 @@ class OrderHandler(BaseHandler):
         
         try:
             if action == "use_my":
-                # Use user's phone number
-                phone = callback.from_user.phone_number or "Не указан"
+                # Telegram User has no phone_number field; resolve from profile or fallback to manual input
+                session = data.get("session")
+                if session is None:
+                    user_service = await get_user_service(data)
+                else:
+                    from app.dependencies import container
+                    user_service = container.get_user_service(session)
+                user = await user_service.get_user_by_telegram_id(callback.from_user.id)
+                phone = user.phone if user and user.phone else None
+                if not phone:
+                    await self.helpers._handle_manual_phone_input(callback, user_id, data)
+                    await callback.answer("Введите номер телефона вручную")
+                    return
                 await self.helpers._handle_phone_selection(callback, phone, user_id, data)
             elif action == "manual":
                 # User wants to enter phone manually

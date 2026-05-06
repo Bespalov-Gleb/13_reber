@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message
+from aiogram.filters import Command
 
 from infrastructure.telegram.handlers.base_handler import BaseHandler
 from infrastructure.telegram.keyboards.courier_keyboard import CourierKeyboard
@@ -22,15 +23,13 @@ class CourierHandler(BaseHandler):
     
     def __init__(self):
         super().__init__()
-        self.router = Router()
-        self._register_handlers()
     
     def _register_handlers(self) -> None:
         """Register courier handlers."""
         # Courier command
         self.router.message.register(
             self.handle_courier_command,
-            F.text == "/courier"
+            Command("courier")
         )
         
         # Courier callbacks
@@ -356,6 +355,19 @@ class CourierHandler(BaseHandler):
             customer = await user_service.get_user_by_id(order.user_id)
             
             # Format order details
+            status_labels = {
+                OrderStatus.PENDING: "Ожидает подтверждения",
+                OrderStatus.CONFIRMED: "Подтвержден",
+                OrderStatus.PREPARING: "Готовится",
+                OrderStatus.READY: "Готов",
+                OrderStatus.OUT_FOR_DELIVERY: "В доставке",
+                OrderStatus.DELIVERED: "Доставлен",
+                OrderStatus.PICKED_UP: "Выдан",
+                OrderStatus.CANCELLED: "Отменен",
+                OrderStatus.REFUNDED: "Возврат",
+            }
+            status_text = status_labels.get(order.status, str(order.status))
+
             text = f"📦 <b>Детали заказа</b>\n\n"
             text += f"🆔 <b>Номер заказа:</b> #{order.order_id[:8]}\n"
             text += f"👤 <b>Клиент:</b> {customer.full_name if customer else 'Неизвестно'}\n"
@@ -363,7 +375,7 @@ class CourierHandler(BaseHandler):
             text += f"📍 <b>Адрес:</b> {order.delivery_info.address if order.delivery_info else 'Не указан'}\n"
             text += f"💰 <b>Сумма:</b> {order.total // 100}₽\n"
             text += f"💳 <b>Оплата:</b> {'Наличные' if order.payment_method.value == 'cash' else 'Карта'}\n"
-            text += f"📊 <b>Статус:</b> {order.status.display_name}\n\n"
+            text += f"📊 <b>Статус:</b> {status_text}\n\n"
             
             if order.comment:
                 text += f"💬 <b>Комментарий:</b> {order.comment}\n\n"

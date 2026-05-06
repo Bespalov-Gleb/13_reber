@@ -8,6 +8,7 @@ pydantic==2.5.2
 pydantic-settings==2.1.0
 redis==5.0.1
 python-dotenv==1.0.0
+structlog==23.2.0
 
 # Payment integration
 yookassa==3.0.0

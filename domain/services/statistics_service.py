@@ -159,8 +159,16 @@ class StatisticsService:
         category_counts = {}
         for item in menu_items:
             category_counts[item.category_id] = category_counts.get(item.category_id, 0) + 1
-        
-        top_categories = sorted(category_counts.items(), key=lambda x: x[1], reverse=True)
+
+        category_name_by_id = {category.category_id: category.name for category in categories}
+        top_categories = sorted(
+            [
+                (category_name_by_id.get(category_id, category_id), count)
+                for category_id, count in category_counts.items()
+            ],
+            key=lambda x: x[1],
+            reverse=True
+        )
         
         # Top items (placeholder - would need order item data)
         top_items = []  # This would require order item statistics

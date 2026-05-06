@@ -120,6 +120,8 @@ class OrderService:
         order_type: str,
         payment_method: str,
         comment: Optional[str] = None,
+        delivery_info: Optional[DeliveryInfo] = None,
+        pickup_info: Optional[PickupInfo] = None,
         send_to_iiko: bool = True,
     ) -> Order:
         """Create order from cart (simplified version)."""
@@ -133,6 +135,8 @@ class OrderService:
             status=OrderStatus.PENDING,
             order_type=OrderType(order_type),
             payment_method=PaymentMethod(payment_method),
+            delivery_info=delivery_info,
+            pickup_info=pickup_info,
             comment=comment,
             created_at=datetime.now(),
             updated_at=datetime.now()

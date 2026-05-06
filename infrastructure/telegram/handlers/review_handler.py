@@ -9,11 +9,15 @@ from infrastructure.telegram.handlers.base_handler import BaseHandler
 from infrastructure.telegram.keyboards.review_keyboard import ReviewKeyboard
 from infrastructure.telegram.utils.message_formatter import MessageFormatter
 from domain.services.review_service import ReviewService
-from app.dependencies import get_review_service
+from app.dependencies import get_review_service, get_user_service
 
 
 class ReviewHandler(BaseHandler):
     """Handler for review operations."""
+
+    def __init__(self):
+        super().__init__()
+        self._pending_comment_reviews: dict[int, str] = {}
     
     def _register_handlers(self) -> None:
         """Register review handlers."""
@@ -22,11 +26,10 @@ class ReviewHandler(BaseHandler):
             self.handle_review_callback,
             F.data.startswith("review")
         )
-        
-        # Text message handler for review comments
         self.router.message.register(
             self.handle_review_text_message,
-            F.text
+            F.text,
+            lambda message: bool(self._pending_comment_reviews.get(message.from_user.id))
         )
     
     async def handle_review_callback(self, callback: CallbackQuery, **kwargs) -> None:
@@ -78,15 +81,24 @@ class ReviewHandler(BaseHandler):
         
         user_id = data.get("user_id", message.from_user.id)
         text = message.text
-        
-        # Check if user is in review comment state
-        # This would be managed by a state service similar to OrderStateService
-        # For now, we'll handle it in the review flow
-        
-        # This is a placeholder - in a real implementation, you'd check the user's current state
-        # and handle comment input accordingly
-        
-        await message.answer("💬 Комментарий сохранен!")
+        review_id = self._pending_comment_reviews.get(user_id)
+        if not review_id:
+            return
+
+        review_service = await get_review_service(data)
+        review = await review_service.get_review_by_id(review_id)
+        if not review:
+            self._pending_comment_reviews.pop(user_id, None)
+            await message.answer("❌ Отзыв не найден. Попробуйте снова.")
+            return
+
+        review.comment = text.strip() if text else None
+        await review_service.update_review(review)
+        self._pending_comment_reviews.pop(user_id, None)
+        await message.answer(
+            "💬 <b>Комментарий сохранен.</b>\nПодтвердите публикацию отзыва:",
+            reply_markup=ReviewKeyboard.get_review_confirmation_keyboard(review_id)
+        )
     
     async def _handle_rating_selection(self, callback: CallbackQuery, parts: list, user_id: int, data: Dict[str, Any]) -> None:
         """Handle rating selection."""
@@ -112,10 +124,16 @@ class ReviewHandler(BaseHandler):
         
         # Create review with rating
         review_service = await get_review_service(data)
+        user_service = await get_user_service(data)
         
         try:
+            db_user = await user_service.get_user_by_telegram_id(user_id)
+            if not db_user:
+                await callback.answer("❌ Пользователь не найден")
+                return
+
             review = await review_service.create_review(
-                user_id=str(user_id),
+                user_id=db_user.user_id,
                 rating=rating,
                 order_id=order_id,
                 menu_item_id=menu_item_id
@@ -149,6 +167,7 @@ class ReviewHandler(BaseHandler):
         if action == "add":
             # Set state for text input
             text = "💬 <b>Добавьте комментарий к отзыву</b>\n\nНапишите ваш отзыв:"
+            self._pending_comment_reviews[user_id] = review_id
             await self.safe_edit_message(
                 callback.message,
                 text=text

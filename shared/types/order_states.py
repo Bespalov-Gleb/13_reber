@@ -38,7 +38,7 @@ class OrderContext:
         self.state = OrderState.IDLE
         self.temp_data = {}
         self.order_type = None  # "delivery" or "pickup"
-        self.payment_method = None  # "online" or "cash"
+        self.payment_method = None  # "cash" or "card"
         self.delivery_address = None
         self.delivery_phone = None
         self.order_time_type = None  # "asap" or "scheduled"
